@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>EquiCost - Team & Category Expense Allocation Tracker</title>
+  <title>Invincible YOU · Expense Tracker</title>
+  <link rel="icon" href="/iy-lockup.png">
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Font Awesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- Inter Font -->
+  <!-- Invincible YOU fonts: Source Sans 3 (body), Literata (headings) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Literata:wght@500;600;700&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 
   <script>
     tailwind.config = {
@@ -21,15 +22,29 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['Inter', 'sans-serif'],
+            sans: ['"Source Sans 3"', 'Arial', 'sans-serif'],
+            serif: ['Literata', 'Georgia', 'serif'],
           },
           colors: {
-            brand: {
-              50: '#eff6ff',
-              500: '#3b82f6',
-              600: '#2563eb',
-              700: '#1d4ed8',
-            }
+            // Invincible YOU theme (invincibleyou.world). The page was built dark on the
+            // "slate" scale; flipping that scale light re-themes every slate class at once.
+            slate: {
+              100: '#1a1a1a', 200: '#1a1a1a', 300: '#364153', 400: '#484848', 500: '#6a7282',
+              600: '#8a8a8a', 700: '#e5e7eb', 800: '#f3f4f6', 900: '#ffffff', 950: '#fafafa'
+            },
+            // Primary (blue) and team payroll (indigo) both use IY purple.
+            blue: {
+              50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087',
+              500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a'
+            },
+            indigo: {
+              50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087',
+              500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a'
+            },
+            // Light accent shades were for dark backgrounds; darken them for readability on white.
+            emerald: { 300: '#047857', 400: '#047857' },
+            amber: { 300: '#b45309', 400: '#b45309' },
+            red: { 300: '#cc0000', 400: '#cc0000' },
           }
         }
       }
@@ -42,46 +57,45 @@
       height: 6px;
     }
     ::-webkit-scrollbar-track {
-      background: #0f172a;
+      background: #fafafa;
     }
     ::-webkit-scrollbar-thumb {
-      background: #334155;
+      background: #d1d5dc;
       border-radius: 4px;
     }
     ::-webkit-scrollbar-thumb:hover {
-      background: #475569;
+      background: #8a8a8a;
     }
     .glass-card {
-      background: rgba(30, 41, 59, 0.7);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+    }
+    h1, h2, h3 {
+      font-family: Literata, Georgia, serif;
     }
   </style>
 </head>
 <body class="h-full flex flex-col font-sans antialiased text-slate-200 bg-slate-950">
 
   <!-- TOP HEADER / NAV -->
-  <header class="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-30 backdrop-blur-md">
+  <header class="border-b border-slate-700 bg-white/90 sticky top-0 z-30 backdrop-blur-md">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex items-center justify-between h-16">
         <!-- Brand / Title -->
-        <div class="flex items-center space-x-3">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
-            <i class="fa-solid font-bold text-white fa-chart-pie text-lg"></i>
-          </div>
-          <div>
-            <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-              EquiCost <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium border border-blue-500/20">Expense & Team Allocator</span>
-            </h1>
-            <p class="text-xs text-slate-400">Track dynamic human capital & direct operational investment</p>
+        <div class="flex items-center space-x-4 min-w-0">
+          <img src="/iy-lockup.png" alt="Invincible YOU" class="h-7 sm:h-9 w-auto flex-shrink-0">
+          <div class="hidden md:block border-l border-slate-700 pl-4 min-w-0">
+            <h1 class="text-base font-semibold tracking-tight text-slate-100 truncate">Expense & Team Allocator</h1>
+            <p class="text-xs text-slate-400 truncate">Track dynamic human capital & direct operational investment</p>
           </div>
         </div>
 
         <!-- Right Controls -->
-        <div class="flex items-center space-x-3">
+        <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
           <!-- Currency Selector -->
           <div class="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
-            <span class="text-xs text-slate-400 mr-2 font-medium">Currency:</span>
+            <span class="hidden sm:inline text-xs text-slate-400 mr-2 font-medium">Currency:</span>
             <select id="currencySelector" onchange="changeCurrency(this.value)" class="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none cursor-pointer">
               <option value="INR" class="bg-slate-900">₹ INR</option>
               <option value="USD" class="bg-slate-900">$ USD</option>
@@ -91,9 +105,9 @@
           </div>
 
           <!-- Executive Report Button -->
-          <button onclick="openExecutiveReportModal()" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow-sm shadow-emerald-900/30">
+          <button onclick="openExecutiveReportModal()" title="Executive Report" aria-label="Executive Report" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#cc0000] hover:bg-[#a30000] text-white transition flex items-center gap-1.5 shadow-sm shadow-red-900/20">
             <i class="fa-solid fa-file-contract"></i>
-            <span>Executive Report</span>
+            <span class="hidden sm:inline">Executive Report</span>
           </button>
 
           <!-- Signed-in user / Sign out -->
@@ -120,7 +134,7 @@
             <i class="fa-solid fa-wallet text-sm"></i>
           </div>
         </div>
-        <div id="kpiTotalSpend" class="text-2xl font-extrabold text-white">₹0</div>
+        <div id="kpiTotalSpend" class="text-2xl font-extrabold text-slate-100">₹0</div>
         <div class="text-xs text-slate-400 mt-1 flex items-center gap-1">
           <span class="text-slate-300 font-medium">Team + Direct Operational Costs</span>
         </div>
@@ -135,7 +149,7 @@
             <i class="fa-solid fa-users text-sm"></i>
           </div>
         </div>
-        <div id="kpiPayroll" class="text-2xl font-extrabold text-white">₹0</div>
+        <div id="kpiPayroll" class="text-2xl font-extrabold text-slate-100">₹0</div>
         <div class="text-xs text-slate-400 mt-1 flex items-center justify-between">
           <span>Active Employees: <strong id="kpiEmpCount" class="text-slate-200">0</strong></span>
           <span id="kpiPayrollShare" class="text-indigo-400 font-semibold">0% of total</span>
@@ -151,7 +165,7 @@
             <i class="fa-solid fa-receipt text-sm"></i>
           </div>
         </div>
-        <div id="kpiDirectExpenses" class="text-2xl font-extrabold text-white">₹0</div>
+        <div id="kpiDirectExpenses" class="text-2xl font-extrabold text-slate-100">₹0</div>
         <div class="text-xs text-slate-400 mt-1 flex items-center justify-between">
           <span>Active Vendors/Items: <strong id="kpiExpCount" class="text-slate-200">0</strong></span>
           <span id="kpiDirectShare" class="text-emerald-400 font-semibold">0% of total</span>
@@ -167,7 +181,7 @@
             <i class="fa-solid fa-fire text-sm"></i>
           </div>
         </div>
-        <div id="kpiTopCategory" class="text-2xl font-extrabold text-white truncate">-</div>
+        <div id="kpiTopCategory" class="text-2xl font-extrabold text-slate-100 truncate">-</div>
         <div id="kpiTopCatDetail" class="text-xs text-slate-400 mt-1">
           Spend: ₹0
         </div>
@@ -203,7 +217,7 @@
         <!-- Category Breakdown Doughnut -->
         <div class="lg:col-span-5 glass-card p-5 rounded-2xl flex flex-col justify-between">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
               <i class="fa-solid fa-pie-chart text-blue-400"></i> Category Investment Share
             </h3>
             <span class="text-xs text-slate-400">Salaries + Direct</span>
@@ -217,7 +231,7 @@
         <!-- Stacked Bar: Salary vs Direct Expense per Category -->
         <div class="lg:col-span-7 glass-card p-5 rounded-2xl flex flex-col justify-between">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+            <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
               <i class="fa-solid fa-chart-column text-emerald-400"></i> Cost Composition by Category
             </h3>
             <div class="flex items-center gap-4 text-xs">
@@ -236,7 +250,7 @@
       <div class="glass-card rounded-2xl p-5 overflow-hidden">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div>
-            <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
               <i class="fa-solid fa-table-list text-indigo-400"></i> Investment & Allocation Breakdown Matrix
             </h3>
             <p class="text-xs text-slate-400">Deep dive into where every rupee/dollar is invested across payroll & operation costs.</p>
@@ -274,7 +288,7 @@
     <div id="tab-team" class="tab-content space-y-6 hidden">
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-lg font-bold text-white">Employee Directory & Time Split Allocations</h2>
+          <h2 class="text-lg font-bold text-slate-100">Employee Directory & Time Split Allocations</h2>
           <p class="text-xs text-slate-400">Define employee salaries and assign percentage split of their work across business categories.</p>
         </div>
         <button onclick="openEmployeeModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-blue-600/20">
@@ -292,7 +306,7 @@
     <div id="tab-expenses" class="tab-content space-y-6 hidden">
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-lg font-bold text-white">Direct Operational Expenses & Subscriptions</h2>
+          <h2 class="text-lg font-bold text-slate-100">Direct Operational Expenses & Subscriptions</h2>
           <p class="text-xs text-slate-400">Log software, tools, vendor payments, and setup fees linked to specific categories.</p>
         </div>
         <button onclick="openExpenseModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-emerald-600/20">
@@ -336,7 +350,7 @@
     <div id="tab-categories" class="tab-content space-y-6 hidden">
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-lg font-bold text-white">Expense Categories & Monthly Budget Limits</h2>
+          <h2 class="text-lg font-bold text-slate-100">Expense Categories & Monthly Budget Limits</h2>
           <p class="text-xs text-slate-400">Manage categories (Tech, Social Media, BD, Finance, Leadership) and budget targets.</p>
         </div>
         <button onclick="openCategoryModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
@@ -352,13 +366,13 @@
   </main>
 
   <!-- MODAL: ADD / EDIT EMPLOYEE -->
-  <div id="employeeModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="employeeModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
       <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
-        <h3 id="employeeModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+        <h3 id="employeeModalTitle" class="text-sm font-bold text-slate-100 flex items-center gap-2">
           <i class="fa-solid fa-user-gear text-blue-400"></i> Add / Edit Employee
         </h3>
-        <button onclick="closeEmployeeModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+        <button onclick="closeEmployeeModal()" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
 
       <form id="employeeForm" onsubmit="saveEmployee(event)" class="p-6 space-y-4 overflow-y-auto flex-1">
@@ -367,11 +381,11 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Employee Name *</label>
-            <input type="text" id="empName" required placeholder="e.g. Aishani" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+            <input type="text" id="empName" required placeholder="e.g. Aishani" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Role / Designation</label>
-            <input type="text" id="empRole" placeholder="e.g. Marketing Lead" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+            <input type="text" id="empRole" placeholder="e.g. Marketing Lead" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
           </div>
         </div>
 
@@ -379,7 +393,7 @@
           <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Base Salary *</label>
           <div class="relative">
             <span id="salaryCurrencyPrefix" class="absolute left-3 top-2.5 text-xs text-slate-400">₹</span>
-            <input type="number" id="empSalary" min="0" step="any" required placeholder="100000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+            <input type="number" id="empSalary" min="0" step="any" required placeholder="100000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
           </div>
         </div>
 
@@ -405,13 +419,13 @@
   </div>
 
   <!-- MODAL: ADD / EDIT EXPENSE -->
-  <div id="expenseModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="expenseModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
-        <h3 id="expenseModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+        <h3 id="expenseModalTitle" class="text-sm font-bold text-slate-100 flex items-center gap-2">
           <i class="fa-solid fa-receipt text-emerald-400"></i> Add / Edit Direct Expense
         </h3>
-        <button onclick="closeExpenseModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+        <button onclick="closeExpenseModal()" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
 
       <form id="expenseForm" onsubmit="saveExpense(event)" class="p-6 space-y-4">
@@ -419,19 +433,19 @@
 
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">Expense Title / Vendor *</label>
-          <input type="text" id="expTitle" required placeholder="e.g. AWS Cloud Servers, Meta Ads" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+          <input type="text" id="expTitle" required placeholder="e.g. AWS Cloud Servers, Meta Ads" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
         </div>
 
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Category *</label>
-            <select id="expCategory" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
+            <select id="expCategory" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer">
               <!-- JS populated -->
             </select>
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Type *</label>
-            <select id="expType" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
+            <select id="expType" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500 cursor-pointer">
               <option value="Monthly Recurring">Monthly Recurring</option>
               <option value="One-Time Expense">One-Time Expense</option>
               <option value="Annual Software">Annual (Pro-rated)</option>
@@ -443,13 +457,13 @@
           <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Amount *</label>
           <div class="relative">
             <span id="expCurrencyPrefix" class="absolute left-3 top-2.5 text-xs text-slate-400">₹</span>
-            <input type="number" id="expAmount" min="0" step="any" required placeholder="25000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+            <input type="number" id="expAmount" min="0" step="any" required placeholder="25000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
           </div>
         </div>
 
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">Notes / Invoice Ref</label>
-          <input type="text" id="expNotes" placeholder="Optional reference notes" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+          <input type="text" id="expNotes" placeholder="Optional reference notes" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500">
         </div>
 
         <div class="pt-4 border-t border-slate-800 flex justify-end space-x-3">
@@ -461,13 +475,13 @@
   </div>
 
   <!-- MODAL: ADD / EDIT CATEGORY -->
-  <div id="categoryModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="categoryModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
       <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
-        <h3 id="categoryModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+        <h3 id="categoryModalTitle" class="text-sm font-bold text-slate-100 flex items-center gap-2">
           <i class="fa-solid fa-folder-plus text-indigo-400"></i> Add / Edit Category
         </h3>
-        <button onclick="closeCategoryModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+        <button onclick="closeCategoryModal()" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
 
       <form id="categoryForm" onsubmit="saveCategory(event)" class="p-6 space-y-4">
@@ -475,17 +489,17 @@
 
         <div>
           <label class="block text-xs font-medium text-slate-300 mb-1">Category Name *</label>
-          <input type="text" id="catName" required placeholder="e.g. Business Development, Tech" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+          <input type="text" id="catName" required placeholder="e.g. Business Development, Tech" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
         </div>
 
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Target Monthly Budget</label>
-            <input type="number" id="catBudget" min="0" step="any" placeholder="150000" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+            <input type="number" id="catBudget" min="0" step="any" placeholder="150000" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Badge Color</label>
-            <input type="color" id="catColor" value="#3b82f6" class="w-full h-9 bg-slate-800 border border-slate-700 rounded-xl p-1 cursor-pointer">
+            <input type="color" id="catColor" value="#680087" class="w-full h-9 bg-slate-800 border border-slate-700 rounded-xl p-1 cursor-pointer">
           </div>
         </div>
 
@@ -498,14 +512,14 @@
   </div>
 
   <!-- MODAL: EXECUTIVE REPORT -->
-  <div id="executiveReportModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+  <div id="executiveReportModal" class="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
       <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90">
         <div class="flex items-center space-x-2">
           <i class="fa-solid fa-file-invoice text-emerald-400 text-lg"></i>
-          <h3 class="text-sm font-bold text-white">Executive Expense & Payroll Allocation Summary</h3>
+          <h3 class="text-sm font-bold text-slate-100">Executive Expense & Payroll Allocation Summary</h3>
         </div>
-        <button onclick="closeExecutiveReportModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+        <button onclick="closeExecutiveReportModal()" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
       </div>
 
       <!-- Printable / Copyable Area -->
@@ -514,7 +528,7 @@
         <!-- Header Info -->
         <div class="border-b border-slate-800 pb-4 flex justify-between items-end">
           <div>
-            <h2 class="text-lg font-bold text-white">Financial & Human Capital Allocation Report</h2>
+            <h2 class="text-lg font-bold text-slate-100">Financial & Human Capital Allocation Report</h2>
             <p class="text-xs text-slate-400">Generated on: <span id="reportDate" class="text-slate-200 font-semibold">--</span></p>
           </div>
           <div class="text-right">
@@ -526,7 +540,7 @@
         <div class="grid grid-cols-3 gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800 text-center">
           <div>
             <p class="text-[10px] text-slate-400 uppercase font-semibold">Total Combined Outflow</p>
-            <p id="reportTotalOutflow" class="text-lg font-bold text-white mt-0.5">₹0</p>
+            <p id="reportTotalOutflow" class="text-lg font-bold text-slate-100 mt-0.5">₹0</p>
           </div>
           <div>
             <p class="text-[10px] text-slate-400 uppercase font-semibold">Payroll Deployment</p>
@@ -540,7 +554,7 @@
 
         <!-- Category Wise Narrative Breakdown -->
         <div>
-          <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-1.5">
+          <h4 class="text-xs font-bold text-slate-100 uppercase tracking-wider mb-3 flex items-center gap-1.5">
             <i class="fa-solid fa-list-check text-blue-400"></i> Category Investment Summaries
           </h4>
           <div id="reportCategoryNarratives" class="space-y-3">
@@ -550,7 +564,7 @@
 
         <!-- Team Deployment Notes -->
         <div>
-          <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-1.5">
+          <h4 class="text-xs font-bold text-slate-100 uppercase tracking-wider mb-2 flex items-center gap-1.5">
             <i class="fa-solid fa-user-clock text-indigo-400"></i> Employee Allocation Breakdown
           </h4>
           <div id="reportTeamBreakdown" class="bg-slate-950/40 rounded-xl p-3 border border-slate-800 space-y-2">
@@ -578,22 +592,20 @@
   <!-- SIGN-IN SCREEN -->
   <div id="loginOverlay" class="fixed inset-0 bg-slate-950 z-[60] flex items-center justify-center p-4 hidden">
     <form onsubmit="submitLogin(event)" class="glass-card w-full max-w-sm rounded-2xl p-6 space-y-4">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center">
-          <i class="fa-solid fa-chart-pie text-white"></i>
-        </div>
+      <div class="space-y-3">
+        <img src="/iy-lockup.png" alt="Invincible YOU" class="h-10 w-auto">
         <div>
-          <h2 class="text-base font-bold text-white">Sign in to EquiCost</h2>
+          <h2 class="text-base font-bold text-slate-100">Sign in</h2>
           <p class="text-xs text-slate-400">Expense & Team Allocator</p>
         </div>
       </div>
       <div>
         <label for="loginEmail" class="block text-xs font-medium text-slate-300 mb-1">Email</label>
-        <input type="email" id="loginEmail" required autocomplete="username" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+        <input type="email" id="loginEmail" required autocomplete="username" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
       </div>
       <div>
         <label for="loginPassword" class="block text-xs font-medium text-slate-300 mb-1">Password</label>
-        <input type="password" id="loginPassword" required autocomplete="current-password" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+        <input type="password" id="loginPassword" required autocomplete="current-password" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
       </div>
       <p id="loginError" role="alert" class="text-xs text-red-400 min-h-[1rem]"></p>
       <button type="submit" class="w-full px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition">Sign in</button>
@@ -604,11 +616,11 @@
   <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
 
   <!-- CUSTOM CONFIRMATION DIALOG MODAL -->
-  <div id="confirmModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="confirmModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-2xl shadow-2xl p-5 space-y-4">
       <div class="flex items-center space-x-3 text-amber-400">
         <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
-        <h3 id="confirmTitle" class="text-sm font-bold text-white">Confirm Action</h3>
+        <h3 id="confirmTitle" class="text-sm font-bold text-slate-100">Confirm Action</h3>
       </div>
       <p id="confirmMessage" class="text-xs text-slate-300">Are you sure you want to proceed?</p>
       <div class="flex justify-end space-x-2 pt-2">
@@ -916,14 +928,14 @@
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-800/40 transition";
         tr.innerHTML = `
-          <td class="py-3 px-4 font-bold text-white flex items-center gap-2">
+          <td class="py-3 px-4 font-bold text-slate-100 flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${m.color}"></span>
             ${esc(m.catName)}
           </td>
           <td class="py-3 px-4">${teamTagHTML}</td>
           <td class="py-3 px-4 text-right font-medium text-indigo-300">${formatCurrency(m.salaryContribution)}</td>
           <td class="py-3 px-4 text-right font-medium text-emerald-300">${formatCurrency(m.directExpenses)}</td>
-          <td class="py-3 px-4 text-right font-bold text-white">${formatCurrency(m.totalSpend)}</td>
+          <td class="py-3 px-4 text-right font-bold text-slate-100">${formatCurrency(m.totalSpend)}</td>
           <td class="py-3 px-4 text-center">${budgetStatusHTML}</td>
         `;
         tbody.appendChild(tr);
@@ -931,7 +943,7 @@
 
       // Render foot
       tfoot.innerHTML = `
-        <tr class="text-white">
+        <tr class="text-slate-100">
           <td class="py-3 px-4 font-extrabold uppercase">Total Investment</td>
           <td class="py-3 px-4 text-slate-400 font-normal">Active Categories: ${state.categories.length}</td>
           <td class="py-3 px-4 text-right text-indigo-400">${formatCurrency(grandSalaryContr)}</td>
@@ -998,7 +1010,7 @@
           <div>
             <div class="flex justify-between items-start mb-2">
               <div>
-                <h3 class="font-bold text-white text-base">${esc(emp.name)}</h3>
+                <h3 class="font-bold text-slate-100 text-base">${esc(emp.name)}</h3>
                 <p class="text-xs text-slate-400">${esc(emp.role || 'Team Member')}</p>
               </div>
               <div class="flex space-x-1">
@@ -1072,7 +1084,7 @@
           </div>
           <div class="flex-1 flex items-center space-x-2">
             <input type="range" min="0" max="100" step="5" value="${currentPct}" data-catid="${cat.id}" oninput="updateSliderVal(this)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
-            <input type="number" min="0" max="100" value="${currentPct}" data-catid="${cat.id}" oninput="updateInputVal(this)" class="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-center text-white focus:outline-none focus:border-blue-500 font-bold">%
+            <input type="number" min="0" max="100" value="${currentPct}" data-catid="${cat.id}" oninput="updateInputVal(this)" class="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-center text-slate-100 focus:outline-none focus:border-blue-500 font-bold">%
           </div>
         `;
         allocContainer.appendChild(div);
@@ -1186,7 +1198,7 @@
         tr.className = "hover:bg-slate-800/40 transition";
         tr.innerHTML = `
           <td class="py-3 px-4">
-            <div class="font-bold text-white">${esc(exp.title)}</div>
+            <div class="font-bold text-slate-100">${esc(exp.title)}</div>
             ${exp.notes ? `<div class="text-[11px] text-slate-400">${esc(exp.notes)}</div>` : ''}
           </td>
           <td class="py-3 px-4">
@@ -1279,7 +1291,7 @@
             <div class="flex justify-between items-start mb-2">
               <div class="flex items-center space-x-2">
                 <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${cat.color}"></span>
-                <h3 class="font-bold text-white text-base">${esc(cat.name)}</h3>
+                <h3 class="font-bold text-slate-100 text-base">${esc(cat.name)}</h3>
               </div>
               <div class="flex space-x-1">
                 <button onclick="editCategory('${cat.id}')" class="p-1 text-slate-400 hover:text-indigo-400 transition"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -1294,7 +1306,7 @@
               </div>
               <div class="flex justify-between text-xs">
                 <span class="text-slate-400">Total Actual Outflow</span>
-                <span class="font-bold text-white">${formatCurrency(m.totalSpend)}</span>
+                <span class="font-bold text-slate-100">${formatCurrency(m.totalSpend)}</span>
               </div>
             </div>
 
@@ -1339,7 +1351,7 @@
         document.getElementById('catId').value = cat.id;
         document.getElementById('catName').value = cat.name;
         document.getElementById('catBudget').value = cat.budget || '';
-        document.getElementById('catColor').value = cat.color || '#3b82f6';
+        document.getElementById('catColor').value = cat.color || '#680087';
       } else {
         document.getElementById('categoryModalTitle').innerHTML = `<i class="fa-solid fa-folder-plus text-indigo-400"></i> Add Custom Category`;
         document.getElementById('catId').value = '';
@@ -1406,7 +1418,7 @@
           datasets: [{
             data: doughnutData,
             backgroundColor: doughnutColors,
-            borderColor: '#0f172a',
+            borderColor: '#ffffff',
             borderWidth: 2,
             hoverOffset: 6
           }]
@@ -1418,8 +1430,8 @@
             legend: {
               position: 'bottom',
               labels: {
-                color: '#94a3b8',
-                font: { size: 11, family: 'Inter' },
+                color: '#484848',
+                font: { size: 11, family: 'Source Sans 3' },
                 padding: 14,
                 usePointStyle: true
               }
@@ -1449,7 +1461,7 @@
             {
               label: 'Team Salary Contribution',
               data: salaryData,
-              backgroundColor: '#6366f1',
+              backgroundColor: '#680087',
               borderRadius: 6
             },
             {
@@ -1467,13 +1479,13 @@
             x: {
               stacked: true,
               grid: { display: false },
-              ticks: { color: '#94a3b8', font: { size: 11 } }
+              ticks: { color: '#484848', font: { size: 11 } }
             },
             y: {
               stacked: true,
-              grid: { color: '#1e293b' },
+              grid: { color: '#e5e7eb' },
               ticks: {
-                color: '#94a3b8',
+                color: '#484848',
                 font: { size: 11 },
                 callback: function(value) { return formatCurrency(value); }
               }
@@ -1517,7 +1529,7 @@
         if (!empListText) empListText = 'No team members allocated.';
 
         div.innerHTML = `
-          <div class="flex justify-between items-center font-bold text-white text-xs">
+          <div class="flex justify-between items-center font-bold text-slate-100 text-xs">
             <span class="flex items-center gap-1.5">
               <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${m.color}"></span>
               ${esc(m.catName)}
