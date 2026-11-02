@@ -1,0 +1,9 @@
+.claude-flow
+.swarm
+ruvector.db
+team_category_expense_allocation_tracker.html
+scripts
+db
+.env*
+agentdb.rvf*
+node_modules

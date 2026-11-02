@@ -1,0 +1,1700 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EquiCost - Team & Category Expense Allocation Tracker</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Custom scrollbar styling for dense tables & modals */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+    .glass-card {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased text-slate-200 bg-slate-950">
+
+  <!-- TOP HEADER / NAV -->
+  <header class="border-b border-slate-800 bg-slate-900/80 sticky top-0 z-30 backdrop-blur-md">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Brand / Title -->
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <i class="fa-solid font-bold text-white fa-chart-pie text-lg"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+              EquiCost <span class="text-xs px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-medium border border-blue-500/20">Expense & Team Allocator</span>
+            </h1>
+            <p class="text-xs text-slate-400">Track dynamic human capital & direct operational investment</p>
+          </div>
+        </div>
+
+        <!-- Right Controls -->
+        <div class="flex items-center space-x-3">
+          <!-- Currency Selector -->
+          <div class="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
+            <span class="text-xs text-slate-400 mr-2 font-medium">Currency:</span>
+            <select id="currencySelector" onchange="changeCurrency(this.value)" class="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none cursor-pointer">
+              <option value="INR" class="bg-slate-900">₹ INR</option>
+              <option value="USD" class="bg-slate-900">$ USD</option>
+              <option value="EUR" class="bg-slate-900">€ EUR</option>
+              <option value="GBP" class="bg-slate-900">£ GBP</option>
+            </select>
+          </div>
+
+          <!-- Executive Report Button -->
+          <button onclick="openExecutiveReportModal()" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center gap-1.5 shadow-sm shadow-emerald-900/30">
+            <i class="fa-solid fa-file-contract"></i>
+            <span>Executive Report</span>
+          </button>
+
+          <!-- Reset Data -->
+          <button onclick="resetToDefaults()" title="Reset to Demo Data" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition">
+            <i class="fa-solid fa-rotate-left"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WRAPPER -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+    <!-- OVERVIEW KPI METRICS BAR -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- Total Monthly Spend -->
+      <div class="glass-card p-5 rounded-2xl relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-blue-500/10 rounded-full blur-xl group-hover:bg-blue-500/20 transition"></div>
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Monthly Spend</span>
+          <div class="p-2 rounded-xl bg-blue-500/10 text-blue-400">
+            <i class="fa-solid fa-wallet text-sm"></i>
+          </div>
+        </div>
+        <div id="kpiTotalSpend" class="text-2xl font-extrabold text-white">₹0</div>
+        <div class="text-xs text-slate-400 mt-1 flex items-center gap-1">
+          <span class="text-slate-300 font-medium">Team + Direct Operational Costs</span>
+        </div>
+      </div>
+
+      <!-- Payroll / Team Allocation Investment -->
+      <div class="glass-card p-5 rounded-2xl relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl group-hover:bg-indigo-500/20 transition"></div>
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Team Payroll Investment</span>
+          <div class="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+            <i class="fa-solid fa-users text-sm"></i>
+          </div>
+        </div>
+        <div id="kpiPayroll" class="text-2xl font-extrabold text-white">₹0</div>
+        <div class="text-xs text-slate-400 mt-1 flex items-center justify-between">
+          <span>Active Employees: <strong id="kpiEmpCount" class="text-slate-200">0</strong></span>
+          <span id="kpiPayrollShare" class="text-indigo-400 font-semibold">0% of total</span>
+        </div>
+      </div>
+
+      <!-- Direct Expenses -->
+      <div class="glass-card p-5 rounded-2xl relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl group-hover:bg-emerald-500/20 transition"></div>
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Direct Operational Costs</span>
+          <div class="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+            <i class="fa-solid fa-receipt text-sm"></i>
+          </div>
+        </div>
+        <div id="kpiDirectExpenses" class="text-2xl font-extrabold text-white">₹0</div>
+        <div class="text-xs text-slate-400 mt-1 flex items-center justify-between">
+          <span>Active Vendors/Items: <strong id="kpiExpCount" class="text-slate-200">0</strong></span>
+          <span id="kpiDirectShare" class="text-emerald-400 font-semibold">0% of total</span>
+        </div>
+      </div>
+
+      <!-- Top Spend Category -->
+      <div class="glass-card p-5 rounded-2xl relative overflow-hidden group">
+        <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-amber-500/10 rounded-full blur-xl group-hover:bg-amber-500/20 transition"></div>
+        <div class="flex justify-between items-start mb-2">
+          <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Highest Investment Category</span>
+          <div class="p-2 rounded-xl bg-amber-500/10 text-amber-400">
+            <i class="fa-solid fa-fire text-sm"></i>
+          </div>
+        </div>
+        <div id="kpiTopCategory" class="text-2xl font-extrabold text-white truncate">-</div>
+        <div id="kpiTopCatDetail" class="text-xs text-slate-400 mt-1">
+          Spend: ₹0
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB NAVIGATION -->
+    <div class="flex border-b border-slate-800 space-x-2 overflow-x-auto pb-1 scrollbar-none">
+      <button onclick="switchTab('dashboard')" id="tabBtn-dashboard" class="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-blue-500 text-blue-400 bg-slate-900/60">
+        <i class="fa-solid fa-chart-line"></i>
+        <span>Dashboard & Analytics</span>
+      </button>
+      <button onclick="switchTab('team')" id="tabBtn-team" class="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40">
+        <i class="fa-solid fa-user-group"></i>
+        <span>Team & Salary Allocations</span>
+      </button>
+      <button onclick="switchTab('expenses')" id="tabBtn-expenses" class="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40">
+        <i class="fa-solid fa-file-invoice-dollar"></i>
+        <span>Direct Expenses</span>
+      </button>
+      <button onclick="switchTab('categories')" id="tabBtn-categories" class="px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40">
+        <i class="fa-solid fa-layer-group"></i>
+        <span>Categories & Budgets</span>
+      </button>
+    </div>
+
+    <!-- TAB 1: DASHBOARD & ANALYTICS -->
+    <div id="tab-dashboard" class="tab-content space-y-6">
+      
+      <!-- CHARTS SECTION -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Category Breakdown Doughnut -->
+        <div class="lg:col-span-5 glass-card p-5 rounded-2xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-pie-chart text-blue-400"></i> Category Investment Share
+            </h3>
+            <span class="text-xs text-slate-400">Salaries + Direct</span>
+          </div>
+          <div class="relative flex items-center justify-center min-h-[260px]">
+            <canvas id="categoryDoughnutChart"></canvas>
+          </div>
+          <p class="text-[11px] text-slate-400 text-center mt-3">Calculated by combining tagged team effort salaries & direct category expenses.</p>
+        </div>
+
+        <!-- Stacked Bar: Salary vs Direct Expense per Category -->
+        <div class="lg:col-span-7 glass-card p-5 rounded-2xl flex flex-col justify-between">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-chart-column text-emerald-400"></i> Cost Composition by Category
+            </h3>
+            <div class="flex items-center gap-4 text-xs">
+              <span class="flex items-center gap-1 text-slate-300"><span class="w-3 h-3 rounded-sm bg-indigo-500 inline-block"></span> Team Salary</span>
+              <span class="flex items-center gap-1 text-slate-300"><span class="w-3 h-3 rounded-sm bg-emerald-500 inline-block"></span> Direct Spend</span>
+            </div>
+          </div>
+          <div class="relative flex-1 min-h-[260px]">
+            <canvas id="stackedBarChart"></canvas>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- INTERACTIVE INVESTMENT MATRIX TABLE -->
+      <div class="glass-card rounded-2xl p-5 overflow-hidden">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-table-list text-indigo-400"></i> Investment & Allocation Breakdown Matrix
+            </h3>
+            <p class="text-xs text-slate-400">Deep dive into where every rupee/dollar is invested across payroll & operation costs.</p>
+          </div>
+          <button onclick="exportToCSV()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1.5 self-start sm:self-auto">
+            <i class="fa-solid fa-download"></i> Export Data CSV
+          </button>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/50">
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider">Category</th>
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider">Team Contribution Breakdown</th>
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider text-right">Team Payroll Spend</th>
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider text-right">Direct Expenses</th>
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider text-right">Total Category Spend</th>
+                <th class="py-3 px-4 font-semibold uppercase tracking-wider text-center">Budget Status</th>
+              </tr>
+            </thead>
+            <tbody id="matrixTableBody" class="divide-y divide-slate-800/60">
+              <!-- Rendered via JS -->
+            </tbody>
+            <tfoot id="matrixTableFoot" class="border-t-2 border-slate-700 font-bold bg-slate-900/80">
+              <!-- Rendered via JS -->
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: TEAM & SALARY ALLOCATION -->
+    <div id="tab-team" class="tab-content space-y-6 hidden">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">Employee Directory & Time Split Allocations</h2>
+          <p class="text-xs text-slate-400">Define employee salaries and assign percentage split of their work across business categories.</p>
+        </div>
+        <button onclick="openEmployeeModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-blue-600/20">
+          <i class="fa-solid fa-user-plus"></i> Add Employee
+        </button>
+      </div>
+
+      <!-- Employee Cards Grid -->
+      <div id="employeeGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- JS rendered cards -->
+      </div>
+    </div>
+
+    <!-- TAB 3: DIRECT EXPENSES -->
+    <div id="tab-expenses" class="tab-content space-y-6 hidden">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">Direct Operational Expenses & Subscriptions</h2>
+          <p class="text-xs text-slate-400">Log software, tools, vendor payments, and setup fees linked to specific categories.</p>
+        </div>
+        <button onclick="openExpenseModal()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-emerald-600/20">
+          <i class="fa-solid fa-plus"></i> Add Direct Expense
+        </button>
+      </div>
+
+      <!-- Expenses Filter & Table -->
+      <div class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row gap-3 justify-between">
+          <div class="relative flex-1">
+            <i class="fa-solid fa-search absolute left-3 top-3 text-slate-500 text-xs"></i>
+            <input type="text" id="expenseSearchInput" onkeyup="filterExpenses()" placeholder="Search expenses by title or vendor..." class="w-full bg-slate-900 border border-slate-700 text-xs rounded-xl pl-9 pr-4 py-2.5 text-slate-200 focus:outline-none focus:border-blue-500 transition">
+          </div>
+          <select id="expenseCategoryFilter" onchange="filterExpenses()" class="bg-slate-900 border border-slate-700 text-xs rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-blue-500 cursor-pointer">
+            <option value="ALL">All Categories</option>
+            <!-- JS populated -->
+          </select>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/50">
+                <th class="py-3 px-4 font-semibold">Expense Name</th>
+                <th class="py-3 px-4 font-semibold">Category</th>
+                <th class="py-3 px-4 font-semibold">Type</th>
+                <th class="py-3 px-4 font-semibold text-right">Amount</th>
+                <th class="py-3 px-4 font-semibold text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="expenseTableBody" class="divide-y divide-slate-800/60">
+              <!-- JS rendered -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: CATEGORIES & BUDGETS -->
+    <div id="tab-categories" class="tab-content space-y-6 hidden">
+      <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-white">Expense Categories & Monthly Budget Limits</h2>
+          <p class="text-xs text-slate-400">Manage categories (Tech, Social Media, BD, Finance, Leadership) and budget targets.</p>
+        </div>
+        <button onclick="openCategoryModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-indigo-600/20">
+          <i class="fa-solid fa-folder-plus"></i> Add Custom Category
+        </button>
+      </div>
+
+      <div id="categoryCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <!-- JS rendered -->
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MODAL: ADD / EDIT EMPLOYEE -->
+  <div id="employeeModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+        <h3 id="employeeModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-user-gear text-blue-400"></i> Add / Edit Employee
+        </h3>
+        <button onclick="closeEmployeeModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form id="employeeForm" onsubmit="saveEmployee(event)" class="p-6 space-y-4 overflow-y-auto flex-1">
+        <input type="hidden" id="empId">
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Employee Name *</label>
+            <input type="text" id="empName" required placeholder="e.g. Aishani" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Role / Designation</label>
+            <input type="text" id="empRole" placeholder="e.g. Marketing Lead" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Base Salary *</label>
+          <div class="relative">
+            <span id="salaryCurrencyPrefix" class="absolute left-3 top-2.5 text-xs text-slate-400">₹</span>
+            <input type="number" id="empSalary" min="0" step="any" required placeholder="100000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500">
+          </div>
+        </div>
+
+        <!-- Category Allocations Split -->
+        <div class="border-t border-slate-800 pt-4">
+          <div class="flex justify-between items-center mb-3">
+            <label class="text-xs font-bold text-slate-200">Category Work Percentage Split (%)</label>
+            <span id="allocationTotalBadge" class="text-xs px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">Total: 0%</span>
+          </div>
+          <p class="text-[11px] text-slate-400 mb-3">Distribute 100% of this employee's effort across categories to calculate category payroll costs.</p>
+
+          <div id="employeeAllocationsContainer" class="space-y-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800 max-h-60 overflow-y-auto">
+            <!-- Render sliders per category -->
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+          <button type="button" onclick="closeEmployeeModal()" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition shadow-md shadow-blue-600/30">Save Employee</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT EXPENSE -->
+  <div id="expenseModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+        <h3 id="expenseModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-receipt text-emerald-400"></i> Add / Edit Direct Expense
+        </h3>
+        <button onclick="closeExpenseModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form id="expenseForm" onsubmit="saveExpense(event)" class="p-6 space-y-4">
+        <input type="hidden" id="expId">
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Expense Title / Vendor *</label>
+          <input type="text" id="expTitle" required placeholder="e.g. AWS Cloud Servers, Meta Ads" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Category *</label>
+            <select id="expCategory" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
+              <!-- JS populated -->
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Type *</label>
+            <select id="expType" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 cursor-pointer">
+              <option value="Monthly Recurring">Monthly Recurring</option>
+              <option value="One-Time Expense">One-Time Expense</option>
+              <option value="Annual Software">Annual (Pro-rated)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Amount *</label>
+          <div class="relative">
+            <span id="expCurrencyPrefix" class="absolute left-3 top-2.5 text-xs text-slate-400">₹</span>
+            <input type="number" id="expAmount" min="0" step="any" required placeholder="25000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Notes / Invoice Ref</label>
+          <input type="text" id="expNotes" placeholder="Optional reference notes" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500">
+        </div>
+
+        <div class="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+          <button type="button" onclick="closeExpenseModal()" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-md shadow-emerald-600/30">Save Expense</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADD / EDIT CATEGORY -->
+  <div id="categoryModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+        <h3 id="categoryModalTitle" class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-folder-plus text-indigo-400"></i> Add / Edit Category
+        </h3>
+        <button onclick="closeCategoryModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form id="categoryForm" onsubmit="saveCategory(event)" class="p-6 space-y-4">
+        <input type="hidden" id="catId">
+
+        <div>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Category Name *</label>
+          <input type="text" id="catName" required placeholder="e.g. Business Development, Tech" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Target Monthly Budget</label>
+            <input type="number" id="catBudget" min="0" step="any" placeholder="150000" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-300 mb-1">Badge Color</label>
+            <input type="color" id="catColor" value="#3b82f6" class="w-full h-9 bg-slate-800 border border-slate-700 rounded-xl p-1 cursor-pointer">
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+          <button type="button" onclick="closeCategoryModal()" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+          <button type="submit" class="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-md shadow-indigo-600/30">Save Category</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EXECUTIVE REPORT -->
+  <div id="executiveReportModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90">
+        <div class="flex items-center space-x-2">
+          <i class="fa-solid fa-file-invoice text-emerald-400 text-lg"></i>
+          <h3 class="text-sm font-bold text-white">Executive Expense & Payroll Allocation Summary</h3>
+        </div>
+        <button onclick="closeExecutiveReportModal()" class="text-slate-400 hover:text-white transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <!-- Printable / Copyable Area -->
+      <div class="p-6 overflow-y-auto space-y-6 text-slate-300 text-xs flex-1" id="reportContentArea">
+        
+        <!-- Header Info -->
+        <div class="border-b border-slate-800 pb-4 flex justify-between items-end">
+          <div>
+            <h2 class="text-lg font-bold text-white">Financial & Human Capital Allocation Report</h2>
+            <p class="text-xs text-slate-400">Generated on: <span id="reportDate" class="text-slate-200 font-semibold">--</span></p>
+          </div>
+          <div class="text-right">
+            <span class="px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold uppercase tracking-wider text-[10px]">Management Audit Ready</span>
+          </div>
+        </div>
+
+        <!-- Executive Summary Stats -->
+        <div class="grid grid-cols-3 gap-3 bg-slate-950/60 p-4 rounded-xl border border-slate-800 text-center">
+          <div>
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Total Combined Outflow</p>
+            <p id="reportTotalOutflow" class="text-lg font-bold text-white mt-0.5">₹0</p>
+          </div>
+          <div>
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Payroll Deployment</p>
+            <p id="reportTotalPayroll" class="text-lg font-bold text-indigo-400 mt-0.5">₹0</p>
+          </div>
+          <div>
+            <p class="text-[10px] text-slate-400 uppercase font-semibold">Direct Operational Costs</p>
+            <p id="reportTotalDirect" class="text-lg font-bold text-emerald-400 mt-0.5">₹0</p>
+          </div>
+        </div>
+
+        <!-- Category Wise Narrative Breakdown -->
+        <div>
+          <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-3 flex items-center gap-1.5">
+            <i class="fa-solid fa-list-check text-blue-400"></i> Category Investment Summaries
+          </h4>
+          <div id="reportCategoryNarratives" class="space-y-3">
+            <!-- JS dynamic content -->
+          </div>
+        </div>
+
+        <!-- Team Deployment Notes -->
+        <div>
+          <h4 class="text-xs font-bold text-white uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <i class="fa-solid fa-user-clock text-indigo-400"></i> Employee Allocation Breakdown
+          </h4>
+          <div id="reportTeamBreakdown" class="bg-slate-950/40 rounded-xl p-3 border border-slate-800 space-y-2">
+            <!-- JS dynamic text -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Action Footer -->
+      <div class="px-6 py-4 border-t border-slate-800 bg-slate-900 flex flex-wrap justify-between items-center gap-3">
+        <span class="text-[11px] text-slate-400">Ready for team sync & executive review</span>
+        <div class="flex items-center space-x-2">
+          <button onclick="copyReportToClipboard()" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5 border border-slate-700">
+            <i class="fa-solid fa-copy"></i> Copy Text
+          </button>
+          <button onclick="window.print()" class="px-4 py-2 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition flex items-center gap-1.5 shadow-md shadow-blue-600/30">
+            <i class="fa-solid fa-print"></i> Print / Save PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUSTOM CONFIRMATION & TOAST NOTIFICATION CONTAINER -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- CUSTOM CONFIRMATION DIALOG MODAL -->
+  <div id="confirmModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-2xl shadow-2xl p-5 space-y-4">
+      <div class="flex items-center space-x-3 text-amber-400">
+        <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+        <h3 id="confirmTitle" class="text-sm font-bold text-white">Confirm Action</h3>
+      </div>
+      <p id="confirmMessage" class="text-xs text-slate-300">Are you sure you want to proceed?</p>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button id="confirmCancelBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+        <button id="confirmOkBtn" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-500 text-white transition">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT APPLICATION LOGIC -->
+  <script>
+    // DEFAULT SEED DATA (Aligned with prompt & audio specs: Aishani, Riya, Shweta, Tech, Social Media, BD, Finance, Salaries, Shweta's Salary)
+    const DEFAULT_DATA = {
+      currency: 'INR',
+      categories: [
+        { id: 'cat-tech', name: 'Tech', budget: 250000, color: '#3b82f6' },
+        { id: 'cat-sm', name: 'Social Media', budget: 80000, color: '#ec4899' },
+        { id: 'cat-bd', name: 'BD', budget: 150000, color: '#10b981' },
+        { id: 'cat-fin', name: 'Finance (New Accounts & Biz)', budget: 100000, color: '#f59e0b' },
+        { id: 'cat-sal', name: 'Salaries', budget: 200000, color: '#8b5cf6' },
+        { id: 'cat-shweta', name: "Shweta's Salary", budget: 160000, color: '#6366f1' }
+      ],
+      employees: [
+        {
+          id: 'emp-1',
+          name: 'Aishani',
+          role: 'Growth & Tech Specialist',
+          baseSalary: 100000,
+          allocations: {
+            'cat-sm': 20,
+            'cat-tech': 80
+          }
+        },
+        {
+          id: 'emp-2',
+          name: 'Riya',
+          role: 'Business Development Exec',
+          baseSalary: 80000,
+          allocations: {
+            'cat-sm': 30,
+            'cat-bd': 70
+          }
+        },
+        {
+          id: 'emp-3',
+          name: 'Shweta',
+          role: 'Executive Director',
+          baseSalary: 150000,
+          allocations: {
+            'cat-shweta': 100
+          }
+        },
+        {
+          id: 'emp-4',
+          name: 'Nikhil',
+          role: 'Product Lead',
+          baseSalary: 120000,
+          allocations: {
+            'cat-tech': 50,
+            'cat-fin': 30,
+            'cat-bd': 20
+          }
+        }
+      ],
+      expenses: [
+        { id: 'exp-1', title: 'AWS Cloud Infrastructure', categoryId: 'cat-tech', type: 'Monthly Recurring', amount: 35000, notes: 'Production servers' },
+        { id: 'exp-2', title: 'Meta & Instagram Ads', categoryId: 'cat-sm', type: 'Monthly Recurring', amount: 25000, notes: 'Brand growth campaign' },
+        { id: 'exp-3', title: 'New Biz Registration & Legal Fees', categoryId: 'cat-fin', type: 'One-Time Expense', amount: 20000, notes: 'Opening new bank account & filings' },
+        { id: 'exp-4', title: 'Hubspot Sales CRM', categoryId: 'cat-bd', type: 'Monthly Recurring', amount: 15000, notes: 'Outreach & pipeline' },
+        { id: 'exp-5', title: 'Figma & GitHub Licenses', categoryId: 'cat-tech', type: 'Monthly Recurring', amount: 9000, notes: 'Dev tools' }
+      ]
+    };
+
+    // STATE VARIABLE
+    let state = {
+      currency: 'INR',
+      categories: [],
+      employees: [],
+      expenses: []
+    };
+
+    let currencySymbols = {
+      INR: '₹',
+      USD: '$',
+      EUR: '€',
+      GBP: '£'
+    };
+
+    // Chart instances
+    let doughnutChart = null;
+    let stackedBarChart = null;
+
+    // INITIALIZATION
+    window.onload = function() {
+      loadState();
+      document.getElementById('currencySelector').value = state.currency;
+      renderAllViews();
+    };
+
+    function loadState() {
+      const saved = localStorage.getItem('equicost_state');
+      if (saved) {
+        try {
+          state = JSON.parse(saved);
+        } catch(e) {
+          state = JSON.parse(JSON.stringify(DEFAULT_DATA));
+        }
+      } else {
+        state = JSON.parse(JSON.stringify(DEFAULT_DATA));
+        saveState();
+      }
+    }
+
+    function saveState() {
+      localStorage.setItem('equicost_state', JSON.stringify(state));
+    }
+
+    function resetToDefaults() {
+      showConfirmModal("Reset Demo Data", "Restoring demo data will replace all custom entries. Continue?", () => {
+        state = JSON.parse(JSON.stringify(DEFAULT_DATA));
+        saveState();
+        document.getElementById('currencySelector').value = state.currency;
+        renderAllViews();
+        showToast("Restored to original default demo data", "success");
+      });
+    }
+
+    function changeCurrency(val) {
+      state.currency = val;
+      saveState();
+      renderAllViews();
+      showToast(`Currency changed to ${val}`, "info");
+    }
+
+    function formatCurrency(amount) {
+      const sym = currencySymbols[state.currency] || '₹';
+      const num = Number(amount) || 0;
+      return sym + num.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+
+    // MAIN RENDER CONTROLLER
+    function renderAllViews() {
+      updateCurrencyPrefixes();
+      renderKPIs();
+      renderMatrixTable();
+      renderEmployeeGrid();
+      renderExpenseTable();
+      renderCategoryGrid();
+      populateCategoryDropdowns();
+      renderCharts();
+    }
+
+    function updateCurrencyPrefixes() {
+      const sym = currencySymbols[state.currency] || '₹';
+      document.querySelectorAll('#salaryCurrencyPrefix, #expCurrencyPrefix').forEach(el => {
+        el.innerText = sym;
+      });
+    }
+
+    // TAB SWITCHER
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('[id^="tabBtn-"]').forEach(btn => {
+        btn.classList.remove('border-blue-500', 'text-blue-400', 'bg-slate-900/60');
+        btn.classList.add('border-transparent', 'text-slate-400');
+      });
+
+      document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tabBtn-${tabId}`);
+      activeBtn.classList.remove('border-transparent', 'text-slate-400');
+      activeBtn.classList.add('border-blue-500', 'text-blue-400', 'bg-slate-900/60');
+
+      if (tabId === 'dashboard') {
+        setTimeout(() => renderCharts(), 50);
+      }
+    }
+
+    // CALCULATIONS UTILITY
+    function getCategoryMetrics(catId) {
+      let salaryContribution = 0;
+      let empSplits = [];
+
+      state.employees.forEach(emp => {
+        const alloc = emp.allocations[catId] || 0;
+        if (alloc > 0) {
+          const amt = (Number(emp.baseSalary) * alloc) / 100;
+          salaryContribution += amt;
+          empSplits.push({ name: emp.name, percent: alloc, amount: amt });
+        }
+      });
+
+      const directExpenses = state.expenses
+        .filter(exp => exp.categoryId === catId)
+        .reduce((sum, exp) => sum + Number(exp.amount), 0);
+
+      const totalSpend = salaryContribution + directExpenses;
+      const cat = state.categories.find(c => c.id === catId);
+      const budget = cat ? Number(cat.budget) || 0 : 0;
+      const budgetPercent = budget > 0 ? (totalSpend / budget) * 100 : 0;
+
+      return {
+        catId,
+        catName: cat ? cat.name : 'Unknown',
+        color: cat ? cat.color : '#64748b',
+        salaryContribution,
+        empSplits,
+        directExpenses,
+        totalSpend,
+        budget,
+        budgetPercent
+      };
+    }
+
+    function getTotals() {
+      let totalPayroll = state.employees.reduce((sum, emp) => sum + Number(emp.baseSalary), 0);
+      let totalDirect = state.expenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
+      let totalSpend = totalPayroll + totalDirect;
+      return { totalPayroll, totalDirect, totalSpend };
+    }
+
+    // KPI CARDS RENDER
+    function renderKPIs() {
+      const totals = getTotals();
+      document.getElementById('kpiTotalSpend').innerText = formatCurrency(totals.totalSpend);
+      document.getElementById('kpiPayroll').innerText = formatCurrency(totals.totalPayroll);
+      document.getElementById('kpiDirectExpenses').innerText = formatCurrency(totals.totalDirect);
+
+      document.getElementById('kpiEmpCount').innerText = state.employees.length;
+      document.getElementById('kpiExpCount').innerText = state.expenses.length;
+
+      const payrollShare = totals.totalSpend > 0 ? ((totals.totalPayroll / totals.totalSpend) * 100).toFixed(1) : 0;
+      const directShare = totals.totalSpend > 0 ? ((totals.totalDirect / totals.totalSpend) * 100).toFixed(1) : 0;
+
+      document.getElementById('kpiPayrollShare').innerText = `${payrollShare}% of total`;
+      document.getElementById('kpiDirectShare').innerText = `${directShare}% of total`;
+
+      // Top category
+      let highestCat = null;
+      let highestSpend = -1;
+
+      state.categories.forEach(cat => {
+        const metrics = getCategoryMetrics(cat.id);
+        if (metrics.totalSpend > highestSpend) {
+          highestSpend = metrics.totalSpend;
+          highestCat = metrics;
+        }
+      });
+
+      if (highestCat && highestSpend > 0) {
+        document.getElementById('kpiTopCategory').innerText = highestCat.catName;
+        document.getElementById('kpiTopCatDetail').innerText = `Total Spend: ${formatCurrency(highestCat.totalSpend)}`;
+      } else {
+        document.getElementById('kpiTopCategory').innerText = "None";
+        document.getElementById('kpiTopCatDetail').innerText = `Spend: ${formatCurrency(0)}`;
+      }
+    }
+
+    // MATRIX TABLE RENDER
+    function renderMatrixTable() {
+      const tbody = document.getElementById('matrixTableBody');
+      const tfoot = document.getElementById('matrixTableFoot');
+      tbody.innerHTML = '';
+
+      const totals = getTotals();
+      let grandSalaryContr = 0;
+      let grandDirectContr = 0;
+      let grandTotalSpend = 0;
+
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+        grandSalaryContr += m.salaryContribution;
+        grandDirectContr += m.directExpenses;
+        grandTotalSpend += m.totalSpend;
+
+        // Render team members pill tags
+        let teamTagHTML = '';
+        if (m.empSplits.length > 0) {
+          teamTagHTML = m.empSplits.map(s => `
+            <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700 mr-1 mb-1" title="${formatCurrency(s.amount)}">
+              ${s.name} <strong class="ml-1 text-blue-400">(${s.percent}%)</strong>
+            </span>
+          `).join('');
+        } else {
+          teamTagHTML = `<span class="text-slate-500 italic text-[11px]">No team allocated</span>`;
+        }
+
+        // Budget Badge
+        let budgetStatusHTML = '';
+        if (m.budget > 0) {
+          const pct = m.budgetPercent.toFixed(0);
+          if (m.totalSpend > m.budget) {
+            budgetStatusHTML = `<span class="px-2 py-1 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 font-bold">${pct}% (Over Budget)</span>`;
+          } else {
+            budgetStatusHTML = `<span class="px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">${pct}% of budget</span>`;
+          }
+        } else {
+          budgetStatusHTML = `<span class="text-slate-500">No Limit</span>`;
+        }
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4 font-bold text-white flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${m.color}"></span>
+            ${m.catName}
+          </td>
+          <td class="py-3 px-4">${teamTagHTML}</td>
+          <td class="py-3 px-4 text-right font-medium text-indigo-300">${formatCurrency(m.salaryContribution)}</td>
+          <td class="py-3 px-4 text-right font-medium text-emerald-300">${formatCurrency(m.directExpenses)}</td>
+          <td class="py-3 px-4 text-right font-bold text-white">${formatCurrency(m.totalSpend)}</td>
+          <td class="py-3 px-4 text-center">${budgetStatusHTML}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Render foot
+      tfoot.innerHTML = `
+        <tr class="text-white">
+          <td class="py-3 px-4 font-extrabold uppercase">Total Investment</td>
+          <td class="py-3 px-4 text-slate-400 font-normal">Active Categories: ${state.categories.length}</td>
+          <td class="py-3 px-4 text-right text-indigo-400">${formatCurrency(grandSalaryContr)}</td>
+          <td class="py-3 px-4 text-right text-emerald-400">${formatCurrency(grandDirectContr)}</td>
+          <td class="py-3 px-4 text-right text-blue-400 text-sm font-extrabold">${formatCurrency(grandTotalSpend)}</td>
+          <td class="py-3 px-4 text-center text-slate-400 font-normal">100% Tracked</td>
+        </tr>
+      `;
+    }
+
+    // RENDER EMPLOYEE GRID
+    function renderEmployeeGrid() {
+      const grid = document.getElementById('employeeGrid');
+      grid.innerHTML = '';
+
+      if (state.employees.length === 0) {
+        grid.innerHTML = `
+          <div class="col-span-full text-center py-12 glass-card rounded-2xl">
+            <i class="fa-solid fa-users-slash text-3xl text-slate-600 mb-2"></i>
+            <p class="text-sm text-slate-400">No employees added yet.</p>
+            <button onclick="openEmployeeModal()" class="mt-3 px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl">Add First Employee</button>
+          </div>
+        `;
+        return;
+      }
+
+      state.employees.forEach(emp => {
+        let totalAllocated = 0;
+        let catBars = [];
+
+        for (const [catId, pct] of Object.entries(emp.allocations || {})) {
+          if (pct > 0) {
+            totalAllocated += pct;
+            const cat = state.categories.find(c => c.id === catId);
+            const catName = cat ? cat.name : catId;
+            const catColor = cat ? cat.color : '#64748b';
+            const allocatedVal = (Number(emp.baseSalary) * pct) / 100;
+
+            catBars.push(`
+              <div class="space-y-1">
+                <div class="flex justify-between text-xs">
+                  <span class="text-slate-300 flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full" style="background-color: ${catColor}"></span>
+                    ${catName}
+                  </span>
+                  <span class="font-semibold text-slate-200">${pct}% (${formatCurrency(allocatedVal)})</span>
+                </div>
+                <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full" style="width: ${pct}%; background-color: ${catColor}"></div>
+                </div>
+              </div>
+            `);
+          }
+        }
+
+        let totalStatusClass = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+        if (totalAllocated !== 100) {
+          totalStatusClass = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+        }
+
+        const card = document.createElement('div');
+        card.className = "glass-card p-5 rounded-2xl space-y-4 flex flex-col justify-between hover:border-slate-700 transition";
+        card.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <h3 class="font-bold text-white text-base">${emp.name}</h3>
+                <p class="text-xs text-slate-400">${emp.role || 'Team Member'}</p>
+              </div>
+              <div class="flex space-x-1">
+                <button onclick="editEmployee('${emp.id}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button onclick="deleteEmployee('${emp.id}')" class="p-1.5 text-slate-400 hover:text-red-400 transition" title="Delete"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+
+            <div class="bg-slate-950/60 p-3 rounded-xl border border-slate-800 flex justify-between items-center mb-4">
+              <span class="text-xs text-slate-400">Monthly Base Salary</span>
+              <span class="text-sm font-extrabold text-indigo-400">${formatCurrency(emp.baseSalary)}</span>
+            </div>
+
+            <div class="space-y-3">
+              <div class="flex justify-between items-center text-xs font-semibold">
+                <span class="text-slate-400">Category Allocation Split</span>
+                <span class="px-2 py-0.5 rounded-full border text-[10px] ${totalStatusClass}">${totalAllocated}% Allocated</span>
+              </div>
+              ${catBars.length > 0 ? catBars.join('') : '<p class="text-xs text-slate-500 italic">No allocations assigned</p>'}
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // EMPLOYEE MODAL HANDLERS
+    function openEmployeeModal(empId = null) {
+      const modal = document.getElementById('employeeModal');
+      const form = document.getElementById('employeeForm');
+      form.reset();
+
+      const allocContainer = document.getElementById('employeeAllocationsContainer');
+      allocContainer.innerHTML = '';
+
+      if (empId) {
+        document.getElementById('employeeModalTitle').innerHTML = `<i class="fa-solid fa-user-pen text-blue-400"></i> Edit Employee`;
+        const emp = state.employees.find(e => e.id === empId);
+        document.getElementById('empId').value = emp.id;
+        document.getElementById('empName').value = emp.name;
+        document.getElementById('empRole').value = emp.role || '';
+        document.getElementById('empSalary').value = emp.baseSalary;
+
+        renderAllocationSliders(emp.allocations || {});
+      } else {
+        document.getElementById('employeeModalTitle').innerHTML = `<i class="fa-solid fa-user-plus text-blue-400"></i> Add New Employee`;
+        document.getElementById('empId').value = '';
+        renderAllocationSliders({});
+      }
+
+      modal.classList.remove('hidden');
+      updateAllocationTotalBadge();
+    }
+
+    function closeEmployeeModal() {
+      document.getElementById('employeeModal').classList.add('hidden');
+    }
+
+    function renderAllocationSliders(existingAlloc = {}) {
+      const allocContainer = document.getElementById('employeeAllocationsContainer');
+      allocContainer.innerHTML = '';
+
+      state.categories.forEach(cat => {
+        const currentPct = existingAlloc[cat.id] !== undefined ? existingAlloc[cat.id] : 0;
+        const div = document.createElement('div');
+        div.className = "flex items-center space-x-3 bg-slate-900 p-2.5 rounded-xl border border-slate-800";
+        div.innerHTML = `
+          <div class="w-1/3 flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${cat.color}"></span>
+            <span class="text-xs font-semibold text-slate-200 truncate">${cat.name}</span>
+          </div>
+          <div class="flex-1 flex items-center space-x-2">
+            <input type="range" min="0" max="100" step="5" value="${currentPct}" data-catid="${cat.id}" oninput="updateSliderVal(this)" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+            <input type="number" min="0" max="100" value="${currentPct}" data-catid="${cat.id}" oninput="updateInputVal(this)" class="w-14 bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-xs text-center text-white focus:outline-none focus:border-blue-500 font-bold">%
+          </div>
+        `;
+        allocContainer.appendChild(div);
+      });
+    }
+
+    function updateSliderVal(slider) {
+      const catId = slider.getAttribute('data-catid');
+      const numInput = slider.nextElementSibling;
+      numInput.value = slider.value;
+      updateAllocationTotalBadge();
+    }
+
+    function updateInputVal(input) {
+      const slider = input.previousElementSibling;
+      slider.value = input.value;
+      updateAllocationTotalBadge();
+    }
+
+    function updateAllocationTotalBadge() {
+      let total = 0;
+      document.querySelectorAll('#employeeAllocationsContainer input[type="number"]').forEach(inp => {
+        total += Number(inp.value) || 0;
+      });
+
+      const badge = document.getElementById('allocationTotalBadge');
+      badge.innerText = `Total: ${total}%`;
+
+      if (total === 100) {
+        badge.className = "text-xs px-2 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+      } else if (total > 100) {
+        badge.className = "text-xs px-2 py-0.5 rounded-full font-bold bg-red-500/20 text-red-400 border border-red-500/30";
+      } else {
+        badge.className = "text-xs px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30";
+      }
+    }
+
+    function saveEmployee(e) {
+      e.preventDefault();
+      const id = document.getElementById('empId').value;
+      const name = document.getElementById('empName').value.trim();
+      const role = document.getElementById('empRole').value.trim();
+      const baseSalary = Number(document.getElementById('empSalary').value);
+
+      const allocations = {};
+      document.querySelectorAll('#employeeAllocationsContainer input[type="number"]').forEach(inp => {
+        const catId = inp.getAttribute('data-catid');
+        const val = Number(inp.value) || 0;
+        if (val > 0) {
+          allocations[catId] = val;
+        }
+      });
+
+      if (id) {
+        // Edit
+        const index = state.employees.findIndex(emp => emp.id === id);
+        if (index !== -1) {
+          state.employees[index] = { id, name, role, baseSalary, allocations };
+          showToast(`Updated employee ${name}`, "success");
+        }
+      } else {
+        // Create
+        const newEmp = {
+          id: 'emp-' + Date.now(),
+          name,
+          role,
+          baseSalary,
+          allocations
+        };
+        state.employees.push(newEmp);
+        showToast(`Added employee ${name}`, "success");
+      }
+
+      saveState();
+      closeEmployeeModal();
+      renderAllViews();
+    }
+
+    function editEmployee(id) {
+      openEmployeeModal(id);
+    }
+
+    function deleteEmployee(id) {
+      const emp = state.employees.find(e => e.id === id);
+      showConfirmModal("Delete Employee", `Are you sure you want to remove ${emp ? emp.name : 'this employee'}?`, () => {
+        state.employees = state.employees.filter(e => e.id !== id);
+        saveState();
+        renderAllViews();
+        showToast("Employee removed", "info");
+      });
+    }
+
+    // DIRECT EXPENSES RENDER & HANDLERS
+    function populateCategoryDropdowns() {
+      const filter = document.getElementById('expenseCategoryFilter');
+      const modalSelect = document.getElementById('expCategory');
+
+      let optionsHTML = state.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      modalSelect.innerHTML = optionsHTML;
+
+      filter.innerHTML = `<option value="ALL">All Categories</option>` + optionsHTML;
+    }
+
+    function renderExpenseTable() {
+      const tbody = document.getElementById('expenseTableBody');
+      const search = document.getElementById('expenseSearchInput') ? document.getElementById('expenseSearchInput').value.toLowerCase() : '';
+      const filterCat = document.getElementById('expenseCategoryFilter') ? document.getElementById('expenseCategoryFilter').value : 'ALL';
+
+      tbody.innerHTML = '';
+
+      const filtered = state.expenses.filter(exp => {
+        const matchesCat = filterCat === 'ALL' || exp.categoryId === filterCat;
+        const matchesSearch = exp.title.toLowerCase().includes(search) || (exp.notes && exp.notes.toLowerCase().includes(search));
+        return matchesCat && matchesSearch;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="5" class="py-8 text-center text-slate-500 italic">No direct expenses found matching filter criteria.</td>
+          </tr>
+        `;
+        return;
+      }
+
+      filtered.forEach(exp => {
+        const cat = state.categories.find(c => c.id === exp.categoryId);
+        const catName = cat ? cat.name : 'Unassigned';
+        const catColor = cat ? cat.color : '#64748b';
+
+        const tr = document.createElement('tr');
+        tr.className = "hover:bg-slate-800/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4">
+            <div class="font-bold text-white">${exp.title}</div>
+            ${exp.notes ? `<div class="text-[11px] text-slate-400">${exp.notes}</div>` : ''}
+          </td>
+          <td class="py-3 px-4">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-200 border border-slate-700">
+              <span class="w-2 h-2 rounded-full" style="background-color: ${catColor}"></span>
+              ${catName}
+            </span>
+          </td>
+          <td class="py-3 px-4 text-slate-300 font-medium">${exp.type}</td>
+          <td class="py-3 px-4 text-right font-extrabold text-emerald-400">${formatCurrency(exp.amount)}</td>
+          <td class="py-3 px-4 text-right space-x-1">
+            <button onclick="editExpense('${exp.id}')" class="p-1.5 text-slate-400 hover:text-emerald-400 transition" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button onclick="deleteExpense('${exp.id}')" class="p-1.5 text-slate-400 hover:text-red-400 transition" title="Delete"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterExpenses() {
+      renderExpenseTable();
+    }
+
+    function openExpenseModal(expId = null) {
+      const modal = document.getElementById('expenseModal');
+      const form = document.getElementById('expenseForm');
+      form.reset();
+
+      populateCategoryDropdowns();
+
+      if (expId) {
+        document.getElementById('expenseModalTitle').innerHTML = `<i class="fa-solid fa-receipt text-emerald-400"></i> Edit Direct Expense`;
+        const exp = state.expenses.find(e => e.id === expId);
+        document.getElementById('expId').value = exp.id;
+        document.getElementById('expTitle').value = exp.title;
+        document.getElementById('expCategory').value = exp.categoryId;
+        document.getElementById('expType').value = exp.type;
+        document.getElementById('expAmount').value = exp.amount;
+        document.getElementById('expNotes').value = exp.notes || '';
+      } else {
+        document.getElementById('expenseModalTitle').innerHTML = `<i class="fa-solid fa-receipt text-emerald-400"></i> Add Direct Expense`;
+        document.getElementById('expId').value = '';
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeExpenseModal() {
+      document.getElementById('expenseModal').classList.add('hidden');
+    }
+
+    function saveExpense(e) {
+      e.preventDefault();
+      const id = document.getElementById('expId').value;
+      const title = document.getElementById('expTitle').value.trim();
+      const categoryId = document.getElementById('expCategory').value;
+      const type = document.getElementById('expType').value;
+      const amount = Number(document.getElementById('expAmount').value);
+      const notes = document.getElementById('expNotes').value.trim();
+
+      if (id) {
+        const idx = state.expenses.findIndex(x => x.id === id);
+        if (idx !== -1) {
+          state.expenses[idx] = { id, title, categoryId, type, amount, notes };
+          showToast(`Expense ${title} updated`, "success");
+        }
+      } else {
+        const newExp = {
+          id: 'exp-' + Date.now(),
+          title,
+          categoryId,
+          type,
+          amount,
+          notes
+        };
+        state.expenses.push(newExp);
+        showToast(`Expense ${title} added`, "success");
+      }
+
+      saveState();
+      closeExpenseModal();
+      renderAllViews();
+    }
+
+    function editExpense(id) {
+      openExpenseModal(id);
+    }
+
+    function deleteExpense(id) {
+      showConfirmModal("Delete Expense", "Are you sure you want to remove this expense entry?", () => {
+        state.expenses = state.expenses.filter(x => x.id !== id);
+        saveState();
+        renderAllViews();
+        showToast("Expense entry deleted", "info");
+      });
+    }
+
+    // CATEGORY MANAGEMENT
+    function renderCategoryGrid() {
+      const grid = document.getElementById('categoryCardsGrid');
+      grid.innerHTML = '';
+
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+
+        const card = document.createElement('div');
+        card.className = "glass-card p-5 rounded-2xl space-y-4 flex flex-col justify-between hover:border-slate-700 transition";
+        card.innerHTML = `
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <div class="flex items-center space-x-2">
+                <span class="w-3.5 h-3.5 rounded-full" style="background-color: ${cat.color}"></span>
+                <h3 class="font-bold text-white text-base">${cat.name}</h3>
+              </div>
+              <div class="flex space-x-1">
+                <button onclick="editCategory('${cat.id}')" class="p-1 text-slate-400 hover:text-indigo-400 transition"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button onclick="deleteCategory('${cat.id}')" class="p-1 text-slate-400 hover:text-red-400 transition"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </div>
+
+            <div class="space-y-2 mt-3">
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-400">Monthly Budget Target</span>
+                <span class="font-bold text-slate-200">${m.budget > 0 ? formatCurrency(m.budget) : 'Unset'}</span>
+              </div>
+              <div class="flex justify-between text-xs">
+                <span class="text-slate-400">Total Actual Outflow</span>
+                <span class="font-bold text-white">${formatCurrency(m.totalSpend)}</span>
+              </div>
+            </div>
+
+            <!-- Budget Progress bar -->
+            ${m.budget > 0 ? `
+              <div class="mt-4 space-y-1">
+                <div class="flex justify-between text-[11px]">
+                  <span class="text-slate-400">Burn Rate</span>
+                  <span class="${m.totalSpend > m.budget ? 'text-red-400 font-bold' : 'text-emerald-400 font-medium'}">${m.budgetPercent.toFixed(0)}%</span>
+                </div>
+                <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+                  <div class="h-full rounded-full transition-all duration-500 ${m.totalSpend > m.budget ? 'bg-red-500' : 'bg-indigo-500'}" style="width: ${Math.min(m.budgetPercent, 100)}%"></div>
+                </div>
+              </div>
+            ` : ''}
+
+            <!-- Sub components breakdown -->
+            <div class="mt-4 border-t border-slate-800/80 pt-3 text-[11px] space-y-1 text-slate-400">
+              <div class="flex justify-between">
+                <span>Team Payroll Contribution:</span>
+                <span class="text-indigo-300 font-medium">${formatCurrency(m.salaryContribution)}</span>
+              </div>
+              <div class="flex justify-between">
+                <span>Direct Operational Spend:</span>
+                <span class="text-emerald-300 font-medium">${formatCurrency(m.directExpenses)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function openCategoryModal(catId = null) {
+      const modal = document.getElementById('categoryModal');
+      const form = document.getElementById('categoryForm');
+      form.reset();
+
+      if (catId) {
+        document.getElementById('categoryModalTitle').innerHTML = `<i class="fa-solid fa-folder-pen text-indigo-400"></i> Edit Category`;
+        const cat = state.categories.find(c => c.id === catId);
+        document.getElementById('catId').value = cat.id;
+        document.getElementById('catName').value = cat.name;
+        document.getElementById('catBudget').value = cat.budget || '';
+        document.getElementById('catColor').value = cat.color || '#3b82f6';
+      } else {
+        document.getElementById('categoryModalTitle').innerHTML = `<i class="fa-solid fa-folder-plus text-indigo-400"></i> Add Custom Category`;
+        document.getElementById('catId').value = '';
+        document.getElementById('catColor').value = '#' + Math.floor(Math.random()*16777215).toString(16);
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeCategoryModal() {
+      document.getElementById('categoryModal').classList.add('hidden');
+    }
+
+    function saveCategory(e) {
+      e.preventDefault();
+      const id = document.getElementById('catId').value;
+      const name = document.getElementById('catName').value.trim();
+      const budget = Number(document.getElementById('catBudget').value) || 0;
+      const color = document.getElementById('catColor').value;
+
+      if (id) {
+        const idx = state.categories.findIndex(c => c.id === id);
+        if (idx !== -1) {
+          state.categories[idx] = { id, name, budget, color };
+          showToast(`Category ${name} updated`, "success");
+        }
+      } else {
+        const newCat = {
+          id: 'cat-' + Date.now(),
+          name,
+          budget,
+          color
+        };
+        state.categories.push(newCat);
+        showToast(`Category ${name} created`, "success");
+      }
+
+      saveState();
+      closeCategoryModal();
+      renderAllViews();
+    }
+
+    function editCategory(id) {
+      openCategoryModal(id);
+    }
+
+    function deleteCategory(id) {
+      const cat = state.categories.find(c => c.id === id);
+      showConfirmModal("Delete Category", `Deleting "${cat ? cat.name : 'this category'}" will untag linked employee allocations and expenses. Proceed?`, () => {
+        state.categories = state.categories.filter(c => c.id !== id);
+        // Clean up allocations
+        state.employees.forEach(emp => {
+          if (emp.allocations && emp.allocations[id]) {
+            delete emp.allocations[id];
+          }
+        });
+        saveState();
+        renderAllViews();
+        showToast("Category removed", "info");
+      });
+    }
+
+    // CHARTS RENDERING (Chart.js)
+    function renderCharts() {
+      const labels = [];
+      const doughnutData = [];
+      const doughnutColors = [];
+      const salaryData = [];
+      const directData = [];
+
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+        labels.push(cat.name);
+        doughnutData.push(m.totalSpend);
+        doughnutColors.push(cat.color);
+        salaryData.push(m.salaryContribution);
+        directData.push(m.directExpenses);
+      });
+
+      // Doughnut Chart
+      const ctxDoughnut = document.getElementById('categoryDoughnutChart').getContext('2d');
+      if (doughnutChart) doughnutChart.destroy();
+
+      doughnutChart = new Chart(ctxDoughnut, {
+        type: 'doughnut',
+        data: {
+          labels: labels,
+          datasets: [{
+            data: doughnutData,
+            backgroundColor: doughnutColors,
+            borderColor: '#0f172a',
+            borderWidth: 2,
+            hoverOffset: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: '#94a3b8',
+                font: { size: 11, family: 'Inter' },
+                padding: 14,
+                usePointStyle: true
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  const val = context.raw || 0;
+                  return ` ${context.label}: ${formatCurrency(val)}`;
+                }
+              }
+            }
+          },
+          cutout: '65%'
+        }
+      });
+
+      // Stacked Bar Chart
+      const ctxBar = document.getElementById('stackedBarChart').getContext('2d');
+      if (stackedBarChart) stackedBarChart.destroy();
+
+      stackedBarChart = new Chart(ctxBar, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [
+            {
+              label: 'Team Salary Contribution',
+              data: salaryData,
+              backgroundColor: '#6366f1',
+              borderRadius: 6
+            },
+            {
+              label: 'Direct Operational Expense',
+              data: directData,
+              backgroundColor: '#10b981',
+              borderRadius: 6
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { color: '#94a3b8', font: { size: 11 } }
+            },
+            y: {
+              stacked: true,
+              grid: { color: '#1e293b' },
+              ticks: {
+                color: '#94a3b8',
+                font: { size: 11 },
+                callback: function(value) { return formatCurrency(value); }
+              }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return ` ${context.dataset.label}: ${formatCurrency(context.raw)}`;
+                }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // EXECUTIVE REPORT MODAL & GENERATOR
+    function openExecutiveReportModal() {
+      const modal = document.getElementById('executiveReportModal');
+      const dateEl = document.getElementById('reportDate');
+      dateEl.innerText = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+      const totals = getTotals();
+      document.getElementById('reportTotalOutflow').innerText = formatCurrency(totals.totalSpend);
+      document.getElementById('reportTotalPayroll').innerText = formatCurrency(totals.totalPayroll);
+      document.getElementById('reportTotalDirect').innerText = formatCurrency(totals.totalDirect);
+
+      // Narrative per Category
+      const narrContainer = document.getElementById('reportCategoryNarratives');
+      narrContainer.innerHTML = '';
+
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+        const div = document.createElement('div');
+        div.className = "p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-1.5";
+
+        let empListText = m.empSplits.map(s => `${s.name} (${s.percent}% effort = ${formatCurrency(s.amount)})`).join(', ');
+        if (!empListText) empListText = 'No team members allocated.';
+
+        div.innerHTML = `
+          <div class="flex justify-between items-center font-bold text-white text-xs">
+            <span class="flex items-center gap-1.5">
+              <span class="w-2.5 h-2.5 rounded-full" style="background-color: ${m.color}"></span>
+              ${m.catName}
+            </span>
+            <span>Total: ${formatCurrency(m.totalSpend)}</span>
+          </div>
+          <p class="text-[11px] text-slate-400">
+            <strong class="text-slate-300">Human Capital:</strong> ${formatCurrency(m.salaryContribution)} &mdash; ${empListText}
+          </p>
+          <p class="text-[11px] text-slate-400">
+            <strong class="text-slate-300">Direct Operational Costs:</strong> ${formatCurrency(m.directExpenses)}
+          </p>
+        `;
+        narrContainer.appendChild(div);
+      });
+
+      // Team summary
+      const teamContainer = document.getElementById('reportTeamBreakdown');
+      teamContainer.innerHTML = state.employees.map(e => `
+        <div class="flex justify-between items-center text-xs">
+          <span class="text-slate-200 font-semibold">${e.name} <span class="text-slate-400 font-normal">(${e.role || 'Member'})</span></span>
+          <span class="text-indigo-400 font-bold">Base Salary: ${formatCurrency(e.baseSalary)}</span>
+        </div>
+      `).join('');
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeExecutiveReportModal() {
+      document.getElementById('executiveReportModal').classList.add('hidden');
+    }
+
+    function copyReportToClipboard() {
+      const totals = getTotals();
+      let text = `=====================================\n`;
+      text += `EXECUTIVE EXPENSE & PAYROLL REPORT\n`;
+      text += `Date: ${new Date().toLocaleDateString()}\n`;
+      text += `=====================================\n\n`;
+      text += `TOTAL COMBINED INVESTMENT: ${formatCurrency(totals.totalSpend)}\n`;
+      text += `- Team Payroll Deployment: ${formatCurrency(totals.totalPayroll)}\n`;
+      text += `- Direct Operational Spend: ${formatCurrency(totals.totalDirect)}\n\n`;
+      text += `--- CATEGORY BREAKDOWN ---\n`;
+
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+        text += `\n* ${cat.name.toUpperCase()} (Total: ${formatCurrency(m.totalSpend)})\n`;
+        text += `  - Team Payroll: ${formatCurrency(m.salaryContribution)}\n`;
+        if (m.empSplits.length > 0) {
+          m.empSplits.forEach(s => {
+            text += `    > ${s.name}: ${s.percent}% split (${formatCurrency(s.amount)})\n`;
+          });
+        }
+        text += `  - Direct Costs: ${formatCurrency(m.directExpenses)}\n`;
+      });
+
+      // Exec command copy fallback for iframe environment
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast("Executive summary copied to clipboard!", "success");
+      } catch (err) {
+        showToast("Failed to copy automatically", "error");
+      }
+      document.body.removeChild(textarea);
+    }
+
+    // EXPORT TO CSV
+    function exportToCSV() {
+      let csv = "Category,Team Payroll Spend,Direct Expenses,Total Category Spend,Budget,Budget Status\n";
+      state.categories.forEach(cat => {
+        const m = getCategoryMetrics(cat.id);
+        const status = m.budget > 0 ? (m.totalSpend > m.budget ? "Over Budget" : "Within Budget") : "No Limit";
+        csv += `"${cat.name}",${m.salaryContribution},${m.directExpenses},${m.totalSpend},${m.budget},"${status}"\n`;
+      });
+
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `EquiCost_Expense_Export_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      showToast("CSV exported successfully", "success");
+    }
+
+    // CUSTOM TOAST & CONFIRM MODALS (NO alert() / confirm())
+    function showToast(msg, type = "info") {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      
+      let borderCol = 'border-blue-500 text-blue-300';
+      let icon = 'fa-circle-info';
+      if (type === 'success') {
+        borderCol = 'border-emerald-500 text-emerald-300';
+        icon = 'fa-circle-check';
+      } else if (type === 'error') {
+        borderCol = 'border-red-500 text-red-300';
+        icon = 'fa-triangle-exclamation';
+      }
+
+      toast.className = `pointer-events-auto flex items-center space-x-2 bg-slate-900 border ${borderCol} px-4 py-2.5 rounded-xl shadow-xl text-xs font-medium transition duration-300 transform translate-y-2 opacity-0`;
+      toast.innerHTML = `<i class="fa-solid ${icon}"></i> <span>${msg}</span>`;
+
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-2', 'opacity-0');
+      }, 10);
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    function showConfirmModal(title, message, onConfirm) {
+      const modal = document.getElementById('confirmModal');
+      document.getElementById('confirmTitle').innerText = title;
+      document.getElementById('confirmMessage').innerText = message;
+
+      const okBtn = document.getElementById('confirmOkBtn');
+      const cancelBtn = document.getElementById('confirmCancelBtn');
+
+      const cleanup = () => {
+        modal.classList.add('hidden');
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
+      };
+
+      okBtn.onclick = () => {
+        cleanup();
+        onConfirm();
+      };
+
+      cancelBtn.onclick = () => {
+        cleanup();
+      };
+
+      modal.classList.remove('hidden');
+    }
+  </script>
+</body>
+</html>

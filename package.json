@@ -1,0 +1,13 @@
+{
+  "name": "iy-expense-tracker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup-db": "node --env-file=.env.local scripts/setup-db.js",
+    "add-user": "node --env-file=.env.local scripts/add-user.js",
+    "test": "node scripts/selfcheck.js"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.0"
+  }
+}
