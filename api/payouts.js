@@ -357,7 +357,10 @@ export default async function handler(req, res) {
       if (me.role === 'employee') return res.status(403).json({ error: 'You do not have access to this' });
       const from = date(req.query.from);
       const to = date(req.query.to);
-      return res.status(200).json({ rows: await registerRows(db, from, to) });
+      const userId = req.query.userId ? intId(req.query.userId) : null;
+      const kind = req.query.kind || null;
+      if (kind && !['salary', 'reimbursement'].includes(kind)) throw new Bad('Unknown invoice type');
+      return res.status(200).json({ rows: await registerRows(db, from, to, { userId, kind }) });
     }
     if (req.method === 'POST') {
       const out = await act(db, me, req.body);

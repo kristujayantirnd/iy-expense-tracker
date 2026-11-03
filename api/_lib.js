@@ -104,11 +104,13 @@ export function buildRegister(invoices) {
 }
 
 // Text starting with = + - @ is prefixed with ' so spreadsheets don't run it as a formula.
-export async function registerRows(db, from, to) {
+// Optional filters: userId (one employee), kind ('salary' | 'reimbursement').
+export async function registerRows(db, from, to, { userId = null, kind = null } = {}) {
   const invoices = await db`select i.user_id as "userId", i.kind, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.total::float8 as total,
                                    u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
                             from invoices i join users u on u.id = i.user_id
-                            where i.status = 'approved' and i.invoice_date between ${from} and ${to}`;
+                            where i.status = 'approved' and i.invoice_date between ${from} and ${to}
+                              and (${userId}::int is null or i.user_id = ${userId}) and (${kind}::text is null or i.kind = ${kind})`;
   return buildRegister(invoices);
 }
 

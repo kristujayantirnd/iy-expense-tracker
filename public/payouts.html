@@ -130,11 +130,24 @@
           <p class="text-xs text-slate-400">Approved invoices only. Payout = salary − 10% TDS + reimbursements, per employee per month.</p>
         </div>
         <div class="flex flex-wrap items-end gap-2">
-          <div><label class="lbl" for="regFrom">From</label><input id="regFrom" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
-          <div><label class="lbl" for="regTo">To</label><input id="regTo" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
           <button onclick="exportRegisterCsv()" class="btn"><i class="fa-solid fa-file-csv"></i>CSV</button>
           <button onclick="printRegister()" class="btn"><i class="fa-solid fa-file-pdf"></i>PDF</button>
         </div>
+      </div>
+      <div class="flex flex-wrap items-end gap-2">
+        <div>
+          <span class="lbl">Month</span>
+          <div class="flex items-center gap-1">
+            <button onclick="shiftRegisterMonth(-1)" class="btn !px-2" aria-label="Previous month"><i class="fa-solid fa-chevron-left"></i></button>
+            <span id="regMonth" class="min-w-[8.5rem] text-center text-sm font-semibold text-slate-100"></span>
+            <button onclick="shiftRegisterMonth(1)" class="btn !px-2" aria-label="Next month"><i class="fa-solid fa-chevron-right"></i></button>
+          </div>
+        </div>
+        <div><label class="lbl" for="regFrom">From</label><input id="regFrom" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
+        <div><label class="lbl" for="regTo">To</label><input id="regTo" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
+        <div><label class="lbl" for="regUser">Employee</label><select id="regUser" class="inp !py-1.5" onchange="loadRegister()"></select></div>
+        <div><label class="lbl" for="regKind">Invoice type</label>
+          <select id="regKind" class="inp !py-1.5" onchange="loadRegister()"><option value="">All</option><option value="salary">Salary</option><option value="reimbursement">Reimbursement</option></select></div>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="registerTable"></table></div>
     </section>
@@ -772,11 +785,32 @@
     }
 
     // PAYOUT REGISTER
+    // Month navigator: sets From/To to a whole month (relative to the month shown in From).
+    function shiftRegisterMonth(step) {
+      const f = $('regFrom').value ? new Date($('regFrom').value + 'T00:00:00') : new Date();
+      const first = new Date(f.getFullYear(), f.getMonth() + step, 1);
+      $('regFrom').value = ymd(first);
+      $('regTo').value = ymd(new Date(first.getFullYear(), first.getMonth() + 1, 0));
+      loadRegister();
+    }
+
+    function renderRegisterMonth() {
+      const from = $('regFrom').value, to = $('regTo').value;
+      const f = new Date(from + 'T00:00:00');
+      const whole = from.endsWith('-01') && to === ymd(new Date(f.getFullYear(), f.getMonth() + 1, 0));
+      $('regMonth').innerText = whole ? `${MONTHS[f.getMonth()]} ${f.getFullYear()}` : 'Custom range';
+    }
+
     async function loadRegister() {
       const from = $('regFrom').value, to = $('regTo').value;
       if (!from || !to) return;
+      renderRegisterMonth();
+      const pick = $('regUser'), keep = pick.value;
+      pick.innerHTML = '<option value="">All employees</option>' + state.users.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}</option>`).join('');
+      pick.value = keep;
+      const q = `?view=register&from=${from}&to=${to}${pick.value ? `&userId=${pick.value}` : ''}${$('regKind').value ? `&kind=${$('regKind').value}` : ''}`;
       try {
-        registerRows = (await api('GET', `?view=register&from=${from}&to=${to}`)).rows;
+        registerRows = (await api('GET', q)).rows;
       } catch (e) { return toast(e.message, 'error'); }
       const sum = (k) => registerRows.reduce((s, r) => s + r[k] * 100, 0) / 100;
       const cols = ['salary', 'tds', 'netSalary', 'reimbursement', 'payout'];
@@ -797,11 +831,16 @@
       URL.revokeObjectURL(a.href);
     }
 
+    function registerFilterLabel() {
+      const u = $('regUser'), k = $('regKind');
+      return (u.value ? ' · ' + esc(u.options[u.selectedIndex].text) : '') + (k.value ? ' · ' + k.options[k.selectedIndex].text + ' only' : '');
+    }
+
     function printRegister() {
       const cols = ['salary', 'tds', 'netSalary', 'reimbursement', 'payout'];
       const sum = (k) => registerRows.reduce((s, r) => s + r[k] * 100, 0) / 100;
       $('printArea').innerHTML = `<div style="font-size:20px;font-weight:700">Payout Register</div>
-        <div style="margin-bottom:12px">${esc(state.employer.companyName)} · ${showDate($('regFrom').value)} to ${showDate($('regTo').value)}</div>
+        <div style="margin-bottom:12px">${esc(state.employer.companyName)} · ${showDate($('regFrom').value)} to ${showDate($('regTo').value)}${registerFilterLabel()}</div>
         <table><tr><th>Month</th><th>Employee</th><th class="num">Gross Salary</th><th class="num">TDS (10%)</th><th class="num">Net Salary</th><th class="num">Reimbursements</th><th class="num">Payout</th></tr>
         ${registerRows.map((r) => `<tr><td>${r.month}</td><td>${esc(r.name)}</td>${cols.map((k) => `<td class="num">${rs(r[k])}</td>`).join('')}</tr>`).join('')}
         <tr><td colspan="2"><b>Total</b></td>${cols.map((k) => `<td class="num"><b>${rs(sum(k))}</b></td>`).join('')}</tr></table>`;
