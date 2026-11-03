@@ -294,11 +294,11 @@
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h2 class="text-lg font-bold text-slate-100">Employee Directory & Time Split Allocations</h2>
-          <p class="text-xs text-slate-400">Define employee salaries and assign percentage split of their work across business categories.</p>
+          <p class="text-xs text-slate-400">Names and salaries come from Payouts &rsaquo; Logins &amp; Salaries. Set each employee's designation and percentage split of work across categories here.</p>
         </div>
-        <button onclick="openEmployeeModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-blue-600/20">
-          <i class="fa-solid fa-user-plus"></i> Add Employee
-        </button>
+        <a href="/payouts.html" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition flex items-center gap-2 shadow-lg shadow-blue-600/20">
+          <i class="fa-solid fa-user-plus"></i> Add Employee in Payouts
+        </a>
       </div>
 
       <!-- Employee Cards Grid -->
@@ -385,8 +385,8 @@
         
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label class="block text-xs font-medium text-slate-300 mb-1">Employee Name *</label>
-            <input type="text" id="empName" required placeholder="e.g. Aishani" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
+            <label class="block text-xs font-medium text-slate-300 mb-1">Employee Name <span class="text-slate-500">(set in Payouts)</span></label>
+            <input type="text" id="empName" readonly title="Change in Payouts > Logins & Salaries" class="opacity-60 cursor-not-allowed w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
           </div>
           <div>
             <label class="block text-xs font-medium text-slate-300 mb-1">Role / Designation</label>
@@ -395,10 +395,10 @@
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Base Salary *</label>
+          <label class="block text-xs font-medium text-slate-300 mb-1">Monthly Base Salary <span class="text-slate-500">(set in Payouts)</span></label>
           <div class="relative">
             <span id="salaryCurrencyPrefix" class="absolute left-3 top-2.5 text-xs text-slate-400">₹</span>
-            <input type="number" id="empSalary" min="0" step="any" required placeholder="100000" class="w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
+            <input type="number" id="empSalary" readonly title="Change in Payouts > Logins & Salaries" class="opacity-60 cursor-not-allowed w-full bg-slate-800 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-blue-500">
           </div>
         </div>
 
@@ -970,8 +970,8 @@
         grid.innerHTML = `
           <div class="col-span-full text-center py-12 glass-card rounded-2xl">
             <i class="fa-solid fa-users-slash text-3xl text-slate-600 mb-2"></i>
-            <p class="text-sm text-slate-400">No employees added yet.</p>
-            <button onclick="openEmployeeModal()" class="mt-3 px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl">Add First Employee</button>
+            <p class="text-sm text-slate-400">No employee logins yet.</p>
+            <a href="/payouts.html" class="inline-block mt-3 px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl">Add employees in Payouts</a>
           </div>
         `;
         return;
@@ -1022,7 +1022,6 @@
               </div>
               <div class="flex space-x-1">
                 <button onclick="editEmployee('${emp.id}')" class="p-1.5 text-slate-400 hover:text-blue-400 transition" title="Edit"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button onclick="deleteEmployee('${emp.id}')" class="p-1.5 text-slate-400 hover:text-red-400 transition" title="Delete"><i class="fa-solid fa-trash"></i></button>
               </div>
             </div>
 
@@ -1146,7 +1145,7 @@
         }
       });
 
-      if (await saveItem('employee', { id, name, role, baseSalary, allocations })) {
+      if (await saveItem('employee', { id, role, allocations })) {
         closeEmployeeModal();
         showToast(existingId ? `Updated employee ${name}` : `Added employee ${name}`, "success");
       }
@@ -1154,13 +1153,6 @@
 
     function editEmployee(id) {
       openEmployeeModal(id);
-    }
-
-    function deleteEmployee(id) {
-      const emp = state.employees.find(e => e.id === id);
-      showConfirmModal("Delete Employee", `Are you sure you want to remove ${emp ? emp.name : 'this employee'}?`, async () => {
-        if (await deleteItem('employee', id)) showToast("Employee removed", "info");
-      });
     }
 
     // DIRECT EXPENSES RENDER & HANDLERS

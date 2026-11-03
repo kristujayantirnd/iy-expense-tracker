@@ -60,6 +60,9 @@
       <div class="flex items-center gap-2">
         <a id="trackerLink" href="/" class="btn hidden"><i class="fa-solid fa-chart-pie"></i><span class="hidden sm:inline">Expense Tracker</span></a>
         <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
+        <button onclick="openPassword()" title="Change password" aria-label="Change password" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
+          <i class="fa-solid fa-key"></i>
+        </button>
         <button onclick="logout()" title="Sign out" aria-label="Sign out" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-right-from-bracket"></i>
         </button>
@@ -81,8 +84,8 @@
             <option value="approved">Approved</option>
             <option value="rejected">Rejected</option>
           </select>
-          <button data-role="employee" onclick="openInvoice('salary')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
-          <button data-role="employee" onclick="openInvoice('reimbursement')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
+          <button onclick="openInvoice('salary')" class="btn-primary"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
+          <button onclick="openInvoice('reimbursement')" class="btn-primary"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
         </div>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="invoiceTable"></table></div>
@@ -131,7 +134,10 @@
     <!-- LOGINS (admin) -->
     <section id="tab-users" class="tab-panel card p-4 space-y-3 hidden">
       <div class="flex items-center justify-between">
-        <h2 class="text-lg font-semibold text-slate-100">Logins & Salaries</h2>
+        <div>
+          <h2 class="text-lg font-semibold text-slate-100">Logins & Salaries</h2>
+          <p class="text-xs text-slate-400">Every login is an employee: these names and salaries are the Expense Tracker's Employee Directory. Role only adds access.</p>
+        </div>
         <button onclick="openUser()" class="btn-primary"><i class="fa-solid fa-user-plus"></i>Add login</button>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="userTable"></table></div>
@@ -200,15 +206,30 @@
   <div id="userModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
     <form onsubmit="saveUser(event)" class="card w-full max-w-md p-5 space-y-3">
       <h3 id="userTitle" class="text-lg font-semibold text-slate-100"></h3>
+      <div><label class="lbl" for="u-name">Name</label><input id="u-name" required maxlength="100" class="inp"></div>
       <div><label class="lbl" for="u-email">Email</label><input id="u-email" type="email" required class="inp"></div>
       <div><label class="lbl" for="u-role">Role</label>
         <select id="u-role" class="inp"><option value="employee">Employee</option><option value="management">Management</option><option value="admin">Admin</option></select>
       </div>
-      <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices</label><input id="u-salary" type="number" min="0" step="0.01" class="inp"></div>
+      <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices and in the Expense Tracker (all roles)</label><input id="u-salary" type="number" min="0" step="0.01" class="inp"></div>
       <div><label class="lbl" for="u-password" id="u-passwordLabel">Password</label><input id="u-password" type="password" minlength="8" autocomplete="new-password" class="inp"></div>
       <div class="flex justify-end gap-2">
         <button type="button" onclick="closeModal('userModal')" class="btn">Cancel</button>
         <button class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- CHANGE PASSWORD -->
+  <div id="passwordModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
+    <form onsubmit="savePassword(event)" class="card w-full max-w-sm p-5 space-y-3">
+      <h3 class="text-lg font-semibold text-slate-100">Change password</h3>
+      <div><label class="lbl" for="pw-current">Current password</label><input id="pw-current" type="password" required autocomplete="current-password" class="inp"></div>
+      <div><label class="lbl" for="pw-new">New password (8+ characters)</label><input id="pw-new" type="password" required minlength="8" autocomplete="new-password" class="inp"></div>
+      <div><label class="lbl" for="pw-confirm">Repeat new password</label><input id="pw-confirm" type="password" required minlength="8" autocomplete="new-password" class="inp"></div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeModal('passwordModal')" class="btn">Cancel</button>
+        <button class="btn-primary">Change password</button>
       </div>
     </form>
   </div>
@@ -240,8 +261,8 @@
     let registerRows = [];
 
     const TABS = {
-      admin: [['invoices', 'Invoices'], ['register', 'Payout Register'], ['users', 'Logins & Salaries'], ['employer', 'Employer & Sheet']],
-      management: [['invoices', 'Invoices'], ['register', 'Payout Register']],
+      admin: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['users', 'Logins & Salaries'], ['employer', 'Employer & Sheet']],
+      management: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register']],
       employee: [['invoices', 'My Invoices'], ['profile', 'My Profile']],
     };
     const PROFILE_FIELDS = ['name', 'address', 'phone', 'accountNumber', 'branch', 'bank', 'ifsc', 'pan'];
@@ -297,7 +318,6 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
-      document.querySelectorAll('[data-role]').forEach((el) => el.classList.toggle('hidden', el.dataset.role !== data.me.role));
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
       renderInvoices();
@@ -308,6 +328,7 @@
     function fillForms() {
       const p = state.me.profile || {};
       PROFILE_FIELDS.forEach((f) => ($('p-' + f).value = p[f] || ''));
+      if (!p.name) $('p-name').value = state.me.name || '';
       pendingSignature = undefined;
       $('p-signature').value = '';
       $('sigPreview').classList.add('hidden');
@@ -342,7 +363,7 @@
       const head = `<tr><th class="th">No.</th><th class="th">Type</th>${role !== 'employee' ? '<th class="th">Employee</th>' : ''}<th class="th">Date</th><th class="th text-right">Amount</th><th class="th">Status</th><th class="th"></th></tr>`;
       const rows = list.map((i) => {
         const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Print or save as PDF"><i class="fa-solid fa-print"></i>Print</button>`];
-        if (role === 'employee' && i.status !== 'approved') actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
+        if (i.userId === state.me.id && i.status !== 'approved') actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
         if (role === 'admin' && i.status === 'pending') {
           actions.push(`<button class="btn !text-emerald-700" onclick="approve(${i.id})"><i class="fa-solid fa-check"></i>Approve</button>`);
           actions.push(`<button class="btn !text-red-700" onclick="reject(${i.id})"><i class="fa-solid fa-xmark"></i>Reject</button>`);
@@ -533,9 +554,9 @@
 
     function renderUsers() {
       if (!state || state.me.role !== 'admin') return;
-      $('userTable').innerHTML = `<tr><th class="th">Email</th><th class="th">Name</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th"></th></tr>`
-        + state.users.map((u) => `<tr><td class="td">${esc(u.email)}</td><td class="td">${esc(u.name || '—')}</td><td class="td capitalize">${u.role}</td>
-          <td class="td text-right">${u.role === 'employee' ? rs(u.salary) : '—'}</td>
+      $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th"></th></tr>`
+        + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td capitalize">${u.role}</td>
+          <td class="td text-right">${rs(u.salary)}</td>
           <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
     }
 
@@ -544,6 +565,7 @@
       const u = id ? state.users.find((x) => x.id === id) : null;
       editingUserId = u ? u.id : null;
       $('userTitle').innerText = u ? 'Edit login' : 'Add login';
+      $('u-name').value = u ? u.name : '';
       $('u-email').value = u ? u.email : '';
       $('u-email').disabled = Boolean(u);
       $('u-role').value = u ? u.role : 'employee';
@@ -556,8 +578,19 @@
 
     async function saveUser(e) {
       e.preventDefault();
-      const user = { id: editingUserId, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value };
+      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value };
       if (await post({ action: 'user', user }, 'Login saved')) closeModal('userModal');
+    }
+
+    function openPassword() {
+      ['pw-current', 'pw-new', 'pw-confirm'].forEach((id) => ($(id).value = ''));
+      openModal('passwordModal');
+    }
+
+    async function savePassword(e) {
+      e.preventDefault();
+      if ($('pw-new').value !== $('pw-confirm').value) return toast('The new passwords do not match', 'error');
+      if (await post({ action: 'password', currentPassword: $('pw-current').value, newPassword: $('pw-new').value }, 'Password changed')) closeModal('passwordModal');
     }
 
     // SIGN IN / OUT

@@ -54,7 +54,7 @@ export const SESSION_MAX_AGE = SESSION_DAYS * 86400;
 export async function requireUser(req, res, roles) {
   const userId = readSession(getCookie(req, 'sid'));
   const rows = userId
-    ? await sql()`select id, email, role, salary::float8 as salary, profile from users where id = ${userId}`
+    ? await sql()`select id, email, name, role, salary::float8 as salary, profile from users where id = ${userId}`
     : [];
   if (!rows.length) {
     res.status(401).json({ error: 'Please sign in' });
@@ -96,7 +96,7 @@ export function buildRegister(invoices) {
 // Text starting with = + - @ is prefixed with ' so spreadsheets don't run it as a formula.
 export async function registerRows(db, from, to) {
   const invoices = await db`select i.user_id as "userId", i.kind, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.total::float8 as total,
-                                   u.email, coalesce(nullif(u.profile->>'name', ''), u.email) as name
+                                   u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
                             from invoices i join users u on u.id = i.user_id
                             where i.status = 'approved' and i.invoice_date between ${from} and ${to}`;
   return buildRegister(invoices);

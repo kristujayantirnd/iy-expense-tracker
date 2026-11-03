@@ -15,17 +15,19 @@ npm test                     # password/session self-check
 
 ## Users
 
-There is no sign-up page. Admins add logins (and set salaries) on **Payouts → Logins & Salaries**, or from the command line:
+There is no sign-up page. Anyone can change their own password with the key button on the Payouts page; admins can set a new password for anyone (Logins & Salaries → Edit). Admins add logins (and set salaries) on **Payouts → Logins & Salaries**, or from the command line:
 
 ```
 npm run add-user -- someone@example.com 'their-password' [admin|employee|management]   # role defaults to admin
 ```
 
-| Role | Can do |
+Every login is an employee: it has a salary and profile, raises its own invoices, and appears in the tracker's Employee Directory and the payout register. The role only adds access:
+
+| Role | Extra access |
 |---|---|
 | Admin | Everything: expense tracker, employer details, logins & salaries, approve/reject invoices, payout register |
 | Management | View the expense tracker, all invoices and the payout register; export CSV/PDF |
-| Employee | Payouts page only: own profile (bank details, signature) and own salary/reimbursement invoices |
+| Employee | None: Payouts page only, own profile and invoices |
 
 ## Payouts (`/payouts.html`)
 

@@ -26,7 +26,11 @@ async function readState(db) {
   const [settings, categories, employees, expenses] = await db.transaction([
     db`select key, value from settings`,
     db`select id, name, budget::float8 as budget, color from categories order by created_at, id`,
-    db`select id, name, role, base_salary::float8 as "baseSalary", allocations from employees order by created_at, id`,
+    // Directory = every login (all are employees; Payouts > Logins & Salaries); the employees row 'u<userId>' adds designation + split.
+    db`select 'u' || u.id as id, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name, coalesce(e.role, '') as role,
+              u.salary::float8 as "baseSalary", coalesce(e.allocations, '{}') as allocations
+       from users u left join employees e on e.id = 'u' || u.id
+       order by 2`,
     db`select id, title, category_id as "categoryId", type, amount::float8 as amount, notes from expenses order by created_at, id`,
   ]);
   const currency = settings.find((s) => s.key === 'currency')?.value || 'INR';
@@ -56,10 +60,13 @@ async function upsert(db, type, item) {
       if (!Number.isFinite(n) || n < 0 || n > 100) throw new Bad('Allocation must be between 0 and 100');
       if (n > 0) allocations[id(catId)] = n;
     }
+    // Name and salary live on the login; only designation and split are saved here.
+    const userId = Number(String(item.id).replace(/^u/, ''));
+    const [u] = Number.isInteger(userId) ? await db`select id from users where id = ${userId}` : [];
+    if (!u) throw new Bad('Add employees in Payouts > Logins & Salaries');
     return db`insert into employees (id, name, role, base_salary, allocations)
-              values (${id(item.id)}, ${text(item.name, 100, true)}, ${text(item.role, 100)}, ${money(item.baseSalary)}, ${JSON.stringify(allocations)})
-              on conflict (id) do update set name = excluded.name, role = excluded.role,
-                base_salary = excluded.base_salary, allocations = excluded.allocations`;
+              values (${'u' + userId}, '', ${text(item.role, 100)}, 0, ${JSON.stringify(allocations)})
+              on conflict (id) do update set role = excluded.role, allocations = excluded.allocations`;
   }
 
   if (type === 'expense') {
@@ -82,7 +89,7 @@ async function remove(db, type, rowId) {
       db`delete from categories where id = ${rowId}`,
     ]);
   }
-  if (type === 'employee') return db`delete from employees where id = ${rowId}`;
+  if (type === 'employee') throw new Bad('Remove employees in Payouts > Logins & Salaries');
   if (type === 'expense') return db`delete from expenses where id = ${rowId}`;
   throw new Bad('Unknown type');
 }

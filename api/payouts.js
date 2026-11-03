@@ -1,4 +1,4 @@
-import { sql, requireUser, hashPassword, registerRows, sheetToken } from './_lib.js';
+import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken } from './_lib.js';
 
 const ROLES = ['admin', 'employee', 'management'];
 const EMPLOYER_FIELDS = ['companyName', 'accountNumber', 'bank', 'ifsc', 'micr', 'bankAddress', 'gstin', 'pan'];
@@ -41,17 +41,17 @@ async function readState(db, me) {
   const all = me.role !== 'employee';
   const [invoices, users] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
-              i.total::float8 as total, i.status, i.note, u.email, coalesce(nullif(u.profile->>'name', ''), u.email) as name
+              i.total::float8 as total, i.status, i.note, u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
        from invoices i join users u on u.id = i.user_id
        where ${all} or i.user_id = ${me.id}
        order by i.invoice_date desc, i.id desc`,
     all
-      ? db`select id, email, role, salary::float8 as salary, profile->>'name' as name from users order by role, email`
+      ? db`select id, email, role, salary::float8 as salary, coalesce(nullif(name, ''), profile->>'name', '') as name from users order by role, 5, email`
       : db`select 1 where false`,
   ]);
   const { signature, ...profile } = me.profile || {};
   return {
-    me: { id: me.id, email: me.email, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature) },
+    me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature) },
     employer: await getEmployer(db),
     invoices,
     users: all ? users : [],
@@ -60,7 +60,6 @@ async function readState(db, me) {
 }
 
 async function saveInvoice(db, me, body) {
-  if (me.role !== 'employee') throw new Bad('Only employees raise invoices');
   if (!me.profile?.name) throw new Bad('Fill in your profile before raising an invoice');
   const invoiceDate = date(body.date);
   let kind = body.kind;
@@ -120,6 +119,13 @@ async function act(db, me, body) {
     }
     case 'invoice':
       return saveInvoice(db, me, body);
+    case 'password': {
+      const next = String(body.newPassword || '');
+      if (next.length < 8) throw new Bad('New password must be at least 8 characters');
+      const [row] = await db`select password_hash from users where id = ${me.id}`;
+      if (!verifyPassword(String(body.currentPassword || ''), row.password_hash)) throw new Bad('Current password is wrong');
+      return db`update users set password_hash = ${hashPassword(next)} where id = ${me.id}`;
+    }
     case 'employer':
       if (!admin) throw new Bad('Only the admin can change employer details');
       return db`insert into settings (key, value) values ('employer', ${JSON.stringify(pick(body.employer, EMPLOYER_FIELDS, 300))})
@@ -140,17 +146,18 @@ async function act(db, me, body) {
       if (!Number.isFinite(salary) || salary < 0 || salary > 1e10) throw new Bad('Salary must be a positive number');
       const password = String(u.password || '');
       if (password && password.length < 8) throw new Bad('Password must be at least 8 characters');
+      const name = text(u.name, 100, true);
       if (u.id) {
         const id = intId(u.id);
         if (id === me.id && u.role !== 'admin') throw new Bad('You cannot remove your own admin access');
-        await db`update users set role = ${u.role}, salary = ${salary} where id = ${id}`;
+        await db`update users set name = ${name}, role = ${u.role}, salary = ${salary} where id = ${id}`;
         if (password) await db`update users set password_hash = ${hashPassword(password)} where id = ${id}`;
         return;
       }
       const email = text(u.email, 200, true).toLowerCase();
       if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new Bad('Enter a valid email');
       if (!password) throw new Bad('Set a password for the new login');
-      const rows = await db`insert into users (email, password_hash, role, salary) values (${email}, ${hashPassword(password)}, ${u.role}, ${salary})
+      const rows = await db`insert into users (email, name, password_hash, role, salary) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${salary})
                             on conflict (email) do nothing returning id`;
       if (!rows.length) throw new Bad('A login with that email already exists');
       return;
