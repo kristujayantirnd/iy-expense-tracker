@@ -1,5 +1,7 @@
 // One PDF per invoice: an invoice page, then every page of each row's bill (in row order).
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { loadUpload, loadDrive } from './_bills.js';
+import { driveToken } from './_lib.js';
 
 const A4 = [595.28, 841.89];
 const M = 40; // page margin
@@ -138,6 +140,11 @@ export async function buildInvoicePdf(inv, loadBill) {
   }
   page.drawLine({ start: { x: sigX, y: y - 66 }, end: { x: sigX + 200, y: y - 66 }, thickness: 0.8 });
   right(emp.name || '', sigX + 200, y - 80);
+  if (inv.status === 'approved' && inv.approvedBy) {
+    text('Approved by', M, y - 52, { f: bold, size: 9, color: GREY });
+    text(inv.approvedBy, M, y - 66, { f: bold, size: 11 });
+    if (inv.approvedOn) text(`on ${showDate(inv.approvedOn)}`, M, y - 80, { size: 9 });
+  }
 
   // Attached bills
   for (const [n, it] of inv.items.entries()) {
@@ -156,3 +163,51 @@ export async function buildInvoicePdf(inv, loadBill) {
   }
   return Buffer.from(await doc.save());
 }
+
+// Loads an invoice (optionally limited to one user's own) and renders it with its bills.
+export async function renderInvoicePdf(db, id, onlyUserId = null) {
+  const [inv] = await db`select i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items, i.total::float8 as total,
+                                i.status, i.employer, i.employee, coalesce(nullif(u.name, ''), u.profile->>'name', u.email) as "userName",
+                                coalesce(nullif(a.name, ''), nullif(a.profile->>'name', ''), a.email) as "approvedBy",
+                                to_char(i.decided_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as "approvedOn"
+                         from invoices i join users u on u.id = i.user_id left join users a on a.id = i.decided_by
+                         where i.id = ${id} and (${onlyUserId === null} or i.user_id = ${onlyUserId})`;
+  if (!inv) return null;
+  const pdf = await buildInvoicePdf(inv, async (it) => {
+    if (it.bill.drive) return loadDrive(it.bill.drive);
+    const buf = await loadUpload(db, it.bill.upload);
+    if (!buf) throw new Error('The uploaded file was deleted from storage (older than 3 months).');
+    return buf;
+  });
+  const name = `${invoiceNo(inv)} - ${inv.userName} - ${inv.date}.pdf`.replace(/[\\/:*?"<>|]/g, '-');
+  return { pdf, name, fileName: `${invoiceNo(inv)}.pdf` };
+}
+
+export const SCRIPT_URL = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+
+// Saves the approved invoice PDF into the admin's Drive folder via their Apps Script web app.
+// Never throws: the result (link or error) is stored on the invoice so the admin can retry.
+export async function copyToDrive(db, id) {
+  let url = '', error = '';
+  try {
+    const rows = await db`select key, value from settings where key in ('driveFolder', 'driveScript')`;
+    const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    if (!cfg.driveFolder || !SCRIPT_URL.test(cfg.driveScript || '')) throw new Error('Set the Drive folder and script link in Employer & Sheet');
+    const out = await renderInvoicePdf(db, id);
+    if (!out) throw new Error('Invoice not found');
+    const res = await fetch(cfg.driveScript, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' }, // Apps Script reads the raw body; text/plain avoids a preflight-style rejection
+      body: JSON.stringify({ secret: driveToken(), folderId: cfg.driveFolder, name: out.name, data: out.pdf.toString('base64') }),
+      redirect: 'follow',
+    });
+    const reply = await res.json().catch(() => ({ error: `Drive script answered with HTTP ${res.status}. Check it is deployed with access "Anyone".` }));
+    if (reply.error || !reply.url) throw new Error(reply.error || 'Drive script did not return a file link');
+    url = reply.url;
+  } catch (e) {
+    error = String(e.message || e).slice(0, 300);
+  }
+  await db`update invoices set drive_url = ${url}, drive_error = ${error} where id = ${id}`;
+  return { url, error };
+}
+

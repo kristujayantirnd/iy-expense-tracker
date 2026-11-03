@@ -78,4 +78,9 @@ create table if not exists bills (
   size int not null,
   created_at timestamptz not null default now(),
   deleted_at timestamptz
-)
+);
+
+-- After approval: payment progress ('' | submitted | paid) and the copy saved to Google Drive.
+alter table invoices add column if not exists payment_status text not null default '';
+alter table invoices add column if not exists drive_url text not null default '';
+alter table invoices add column if not exists drive_error text not null default ''

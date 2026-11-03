@@ -1,4 +1,5 @@
-import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken } from './_lib.js';
+import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken, driveToken } from './_lib.js';
+import { copyToDrive, SCRIPT_URL } from './_pdf.js';
 import { driveFileId } from './_bills.js';
 
 const ROLES = ['admin', 'employee', 'management'];
@@ -50,12 +51,18 @@ const getEmployer = async (db) => {
   return rows.length ? JSON.parse(rows[0].value) : {};
 };
 
+const getDrive = async (db) => {
+  const rows = await db`select key, value from settings where key in ('driveFolder', 'driveScript')`;
+  const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return { folder: cfg.driveFolder || '', script: cfg.driveScript || '' };
+};
+
 // List queries leave out signatures (large); the invoice PDF reads the full copy.
 async function readState(db, me) {
   const all = me.role !== 'employee';
   const [invoices, users] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
-              i.total::float8 as total, i.status, i.note, u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
+              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
        from invoices i join users u on u.id = i.user_id
        where ${all} or i.user_id = ${me.id}
        order by i.invoice_date desc, i.id desc`,
@@ -70,6 +77,7 @@ async function readState(db, me) {
     invoices,
     users: all ? users : [],
     sheetToken: me.role === 'admin' ? sheetToken() : undefined,
+    drive: me.role === 'admin' ? { ...(await getDrive(db)), secret: driveToken() } : undefined,
   };
 }
 
@@ -154,7 +162,33 @@ async function act(db, me, body) {
       const rows = await db`update invoices set status = ${body.status}, note = ${text(body.note, 500)}, decided_by = ${me.id}, decided_at = now()
                             where id = ${intId(body.id)} and status = 'pending' returning id`;
       if (!rows.length) throw new Bad('Only pending invoices can be approved or rejected');
+      if (body.status === 'approved') await copyToDrive(db, rows[0].id);
       return;
+    }
+    case 'driveCopy': {
+      if (!admin) throw new Bad('Only the admin can copy invoices to Drive');
+      const [inv] = await db`select status from invoices where id = ${intId(body.id)}`;
+      if (inv?.status !== 'approved') throw new Bad('Only approved invoices are copied to Drive');
+      return copyToDrive(db, intId(body.id));
+    }
+    case 'payment': {
+      if (!admin) throw new Bad('Only the admin can update payment status');
+      if (!['', 'submitted', 'paid'].includes(body.paymentStatus)) throw new Bad('Unknown payment status');
+      const rows = await db`update invoices set payment_status = ${body.paymentStatus} where id = ${intId(body.id)} and status = 'approved' returning id`;
+      if (!rows.length) throw new Bad('Only approved invoices can be marked Submitted or Payment Completed');
+      return;
+    }
+    case 'drive': {
+      if (!admin) throw new Bad('Only the admin can change Drive settings');
+      const folder = String(body.folder || '').trim();
+      const m = folder.match(/\/folders\/([\w-]{10,})/) || folder.match(/^([\w-]{10,})$/);
+      if (folder && !m) throw new Bad('Paste the Google Drive folder link (it contains /folders/)');
+      const script = String(body.script || '').trim();
+      if (script && !SCRIPT_URL.test(script)) throw new Bad('The script link must look like https://script.google.com/macros/s/…/exec');
+      return db.transaction([
+        db`insert into settings (key, value) values ('driveFolder', ${m ? m[1] : ''}) on conflict (key) do update set value = excluded.value`,
+        db`insert into settings (key, value) values ('driveScript', ${script}) on conflict (key) do update set value = excluded.value`,
+      ]);
     }
     case 'user': {
       if (!admin) throw new Bad('Only the admin can manage logins');

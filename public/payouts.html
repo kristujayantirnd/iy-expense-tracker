@@ -81,7 +81,9 @@
           <select id="statusFilter" onchange="renderInvoices()" class="inp !w-auto !py-1.5 text-xs">
             <option value="">All statuses</option>
             <option value="pending">Pending</option>
-            <option value="approved">Approved</option>
+            <option value="approved">Approved (all)</option>
+            <option value="submitted">Submitted</option>
+            <option value="paid">Payment Completed</option>
             <option value="rejected">Rejected</option>
           </select>
           <button onclick="openInvoice('salary')" class="btn-primary"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
@@ -159,6 +161,28 @@
           <div class="sm:col-span-2"><label class="lbl" for="e-bankAddress">Bank address</label><textarea id="e-bankAddress" rows="2" class="inp" maxlength="300"></textarea></div>
           <div class="sm:col-span-2"><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i>Save employer details</button></div>
         </form>
+      </div>
+      <div class="card p-4 space-y-3">
+        <h2 class="text-lg font-semibold text-slate-100">Google Drive Copy of Approved Invoices</h2>
+        <p class="text-xs text-slate-400">On approval, each invoice PDF (with its bills) is saved into this folder, named like <code>RMB-0001 - Name - 2026-11-04.pdf</code>.</p>
+        <form onsubmit="saveDrive(event)" class="grid gap-3">
+          <div><label class="lbl" for="d-folder">Drive folder link</label><input id="d-folder" class="inp" placeholder="https://drive.google.com/drive/folders/…"></div>
+          <div><label class="lbl" for="d-script">Apps Script web app link (from step 4 below)</label><input id="d-script" class="inp" placeholder="https://script.google.com/macros/s/…/exec"></div>
+          <div><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i>Save Drive settings</button></div>
+        </form>
+        <details class="text-xs text-slate-300">
+          <summary class="cursor-pointer font-semibold">One-time setup (about 5 minutes)</summary>
+          <ol class="list-decimal ml-5 mt-2 space-y-1">
+            <li>Signed in to the Google account that owns the folder, open <a class="underline" href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com → New project</a>.</li>
+            <li>Delete what's there and paste the code below (it contains this app's secret key; keep it private).</li>
+            <li>Click <b>Deploy → New deployment</b>, type <b>Web app</b>, Execute as <b>Me</b>, Who has access <b>Anyone</b>. Click Deploy and allow access when Google asks.</li>
+            <li>Copy the <b>Web app URL</b> (ends in <code>/exec</code>) into the field above, paste the folder link, and save.</li>
+          </ol>
+          <div class="flex gap-2 mt-2 items-start">
+            <textarea id="driveScriptCode" readonly rows="9" class="inp font-mono text-[11px]" aria-label="Apps Script code"></textarea>
+            <button type="button" onclick="copyText('driveScriptCode')" class="btn"><i class="fa-solid fa-copy"></i>Copy</button>
+          </div>
+        </details>
       </div>
       <div class="card p-4 space-y-2">
         <h2 class="text-lg font-semibold text-slate-100">Bill Storage</h2>
@@ -340,6 +364,11 @@
       $('sigPreview').classList.add('hidden');
       $('sigStatus').innerText = state.me.hasSignature ? 'A signature is saved. Choose a file to replace it.' : 'No signature saved yet.';
       EMPLOYER_FIELDS.forEach((f) => ($('e-' + f).value = state.employer[f] || ''));
+      if (state.drive) {
+        $('d-folder').value = state.drive.folder ? `https://drive.google.com/drive/folders/${state.drive.folder}` : '';
+        $('d-script').value = state.drive.script;
+        $('driveScriptCode').value = DRIVE_SCRIPT.replace('__SECRET__', state.drive.secret);
+      }
       if (state.sheetToken) {
         $('sheetFormula').value = `=IMPORTDATA("${location.origin}/api/payout-sheet?token=${state.sheetToken}")`;
       }
@@ -357,16 +386,41 @@
     }
 
     // INVOICES
-    function statusBadge(s) {
-      const cls = { pending: 'bg-amber-50 text-amber-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-red-50 text-red-700' }[s];
-      return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${s[0].toUpperCase() + s.slice(1)}</span>`;
+    const PAYMENT = { '': 'Approved', submitted: 'Submitted', paid: 'Payment Completed' };
+    function statusBadge(i) {
+      const key = i.status === 'approved' ? i.paymentStatus || 'approved' : i.status;
+      const cls = { pending: 'bg-amber-50 text-amber-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-red-50 text-red-700',
+        submitted: 'bg-blue-50 text-blue-700', paid: 'bg-emerald-100 text-emerald-800' }[key];
+      const label = i.status === 'approved' ? PAYMENT[i.paymentStatus || ''] : i.status[0].toUpperCase() + i.status.slice(1);
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${label}</span>`;
+    }
+
+    // Drive copy state for approved invoices: link, or failure with Retry (admin).
+    function driveCell(i) {
+      if (i.status !== 'approved') return '';
+      if (i.driveUrl) return `<a href="${esc(i.driveUrl)}" target="_blank" rel="noopener" class="block text-xs text-emerald-700 underline mt-1"><i class="fa-brands fa-google-drive"></i> Saved to Drive</a>`;
+      if (i.driveError) return `<div class="text-xs text-red-700 mt-1 whitespace-normal max-w-xs"><i class="fa-brands fa-google-drive"></i> Drive copy failed: ${esc(i.driveError)}
+        ${state.me.role === 'admin' ? `<button class="underline font-semibold ml-1" onclick="retryDrive(${i.id})">Retry</button>` : ''}</div>`;
+      // approved before Drive copying existed
+      return state.me.role === 'admin' ? `<button class="block text-xs underline text-slate-400 mt-1" onclick="retryDrive(${i.id})"><i class="fa-brands fa-google-drive"></i> Copy to Drive</button>` : '';
+    }
+
+    async function retryDrive(id) {
+      toast('Copying to Google Drive…');
+      await post({ action: 'driveCopy', id });
+      const inv = state.invoices.find((x) => x.id === id);
+      toast(inv && inv.driveUrl ? 'Saved to Google Drive' : 'Drive copy failed again: ' + ((inv && inv.driveError) || ''), inv && inv.driveUrl ? 'success' : 'error');
+    }
+
+    function setPayment(id, paymentStatus) {
+      post({ action: 'payment', id, paymentStatus }, `Marked ${PAYMENT[paymentStatus]}`);
     }
 
     function renderInvoices() {
       if (!state) return;
       const role = state.me.role;
       const filter = $('statusFilter').value;
-      const list = state.invoices.filter((i) => !filter || i.status === filter);
+      const list = state.invoices.filter((i) => !filter || i.status === filter || (i.status === 'approved' && i.paymentStatus === filter));
       const head = `<tr><th class="th">No.</th><th class="th">Type</th>${role !== 'employee' ? '<th class="th">Employee</th>' : ''}<th class="th">Date</th><th class="th text-right">Amount</th><th class="th">Status</th><th class="th"></th></tr>`;
       const rows = list.map((i) => {
         const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Invoice with attached bills as one PDF"><i class="fa-solid fa-file-pdf"></i>PDF</button>`];
@@ -375,11 +429,15 @@
           actions.push(`<button class="btn !text-emerald-700" onclick="approve(${i.id})"><i class="fa-solid fa-check"></i>Approve</button>`);
           actions.push(`<button class="btn !text-red-700" onclick="reject(${i.id})"><i class="fa-solid fa-xmark"></i>Reject</button>`);
         }
+        if (role === 'admin' && i.status === 'approved') {
+          actions.push(`<select class="inp !w-auto !py-1.5 text-xs" aria-label="Payment status for ${invNo(i)}" onchange="setPayment(${i.id}, this.value)">
+            ${Object.entries(PAYMENT).map(([k, label]) => `<option value="${k}" ${k === (i.paymentStatus || '') ? 'selected' : ''}>${label}</option>`).join('')}</select>`);
+        }
         const note = i.status === 'rejected' && i.note ? `<div class="text-xs text-red-700 mt-1 whitespace-normal">${esc(i.note)}</div>` : '';
         return `<tr><td class="td font-mono">${invNo(i)}</td><td class="td">${kindLabel(i.kind)}</td>
           ${role !== 'employee' ? `<td class="td">${esc(i.name)}</td>` : ''}
           <td class="td">${showDate(i.date)}</td><td class="td text-right">${rs(i.total)}</td>
-          <td class="td">${statusBadge(i.status)}${note}</td><td class="td"><div class="flex gap-1 justify-end">${actions.join('')}</div></td></tr>`;
+          <td class="td">${statusBadge(i)}${note}${driveCell(i)}</td><td class="td"><div class="flex gap-1 justify-end">${actions.join('')}</div></td></tr>`;
       }).join('');
       $('invoiceTable').innerHTML = head + (rows || `<tr><td class="td text-slate-400" colspan="7">No invoices yet.</td></tr>`);
     }
@@ -447,7 +505,12 @@
     function approve(id) {
       const inv = state.invoices.find((i) => i.id === id);
       if (window.confirm(`Approve ${invNo(inv)} for ${inv.name} (${rs(inv.total)})? It can't be edited after this.`)) {
-        post({ action: 'decide', id, status: 'approved' }, 'Invoice approved');
+        toast('Approving and copying the PDF to Google Drive…');
+        post({ action: 'decide', id, status: 'approved' }).then((ok) => {
+          if (!ok) return;
+          const done = state.invoices.find((x) => x.id === id);
+          toast(done.driveUrl ? 'Invoice approved and saved to Google Drive' : 'Invoice approved, but the Drive copy failed (see the invoice)', done.driveUrl ? 'success' : 'error');
+        });
       }
     }
     function reject(id) { rejectId = id; $('rejectNote').value = ''; openModal('rejectModal'); }
@@ -597,6 +660,33 @@
     function saveEmployer(e) {
       e.preventDefault();
       post({ action: 'employer', employer: Object.fromEntries(EMPLOYER_FIELDS.map((f) => [f, $('e-' + f).value])) }, 'Employer details saved');
+    }
+
+    // Runs in the admin's Google account; saves PDFs the app sends into the chosen folder.
+    const DRIVE_SCRIPT = `// Invincible YOU Payouts: saves approved invoice PDFs into Google Drive.
+const SECRET = '__SECRET__';
+function doPost(e) {
+  const out = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+  try {
+    const body = JSON.parse(e.postData.contents);
+    if (body.secret !== SECRET) return out({ error: 'Wrong secret: copy the script again from Employer & Sheet' });
+    const folder = DriveApp.getFolderById(body.folderId);
+    const old = folder.getFilesByName(body.name);
+    while (old.hasNext()) old.next().setTrashed(true); // re-copies replace the earlier file
+    const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(body.data), 'application/pdf', body.name));
+    return out({ url: file.getUrl() });
+  } catch (err) {
+    return out({ error: String(err.message || err) });
+  }
+}`;
+
+    function saveDrive(e) {
+      e.preventDefault();
+      post({ action: 'drive', folder: $('d-folder').value, script: $('d-script').value }, 'Drive settings saved');
+    }
+
+    function copyText(id) {
+      navigator.clipboard.writeText($(id).value).then(() => toast('Copied', 'success'), () => $(id).select());
     }
 
     function copySheetFormula() {

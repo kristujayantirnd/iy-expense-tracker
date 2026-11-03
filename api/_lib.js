@@ -69,6 +69,8 @@ export async function requireUser(req, res, roles) {
 
 // Secret for the Google Sheets IMPORTDATA link. shortcut: derived from SESSION_SECRET, so it only changes if that does.
 export const sheetToken = (secret = process.env.SESSION_SECRET) => sign('payout-sheet', secret);
+// Shared secret the Google Apps Script checks before saving a PDF into Drive.
+export const driveToken = (secret = process.env.SESSION_SECRET) => sign('drive-copy', secret);
 
 export const TDS_RATE = 0.1;
 const round2 = (n) => Math.round(n * 100) / 100;
