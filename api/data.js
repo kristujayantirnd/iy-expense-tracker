@@ -88,7 +88,8 @@ async function remove(db, type, rowId) {
 }
 
 export default async function handler(req, res) {
-  const user = await requireUser(req, res);
+  // Employees use the payouts page only; management can look but not change.
+  const user = await requireUser(req, res, req.method === 'GET' ? ['admin', 'management'] : ['admin']);
   if (!user) return;
   const db = sql();
   try {

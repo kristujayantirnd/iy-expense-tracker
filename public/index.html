@@ -104,6 +104,11 @@
             </select>
           </div>
 
+          <a href="/payouts.html" title="Payouts" aria-label="Payouts" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-file-invoice"></i>
+            <span class="hidden sm:inline">Payouts</span>
+          </a>
+
           <!-- Executive Report Button -->
           <button onclick="openExecutiveReportModal()" title="Executive Report" aria-label="Executive Report" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#cc0000] hover:bg-[#a30000] text-white transition flex items-center gap-1.5 shadow-sm shadow-red-900/20">
             <i class="fa-solid fa-file-contract"></i>
@@ -671,6 +676,8 @@
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) { showLogin(); throw new Error('Please sign in'); }
+      // Employees only have the payouts page.
+      if (res.status === 403 && data.role === 'employee') { location.href = '/payouts.html'; throw new Error('Please sign in'); }
       if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
       return data;
     }

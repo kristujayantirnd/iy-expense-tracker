@@ -50,16 +50,62 @@ export function sessionCookie(value, maxAgeSec) {
 
 export const SESSION_MAX_AGE = SESSION_DAYS * 86400;
 
-export async function requireUser(req, res) {
+// roles: allowed roles; omit to allow any signed-in user.
+export async function requireUser(req, res, roles) {
   const userId = readSession(getCookie(req, 'sid'));
-  if (!userId) {
-    res.status(401).json({ error: 'Please sign in' });
-    return null;
-  }
-  const rows = await sql()`select id, email from users where id = ${userId}`;
+  const rows = userId
+    ? await sql()`select id, email, role, salary::float8 as salary, profile from users where id = ${userId}`
+    : [];
   if (!rows.length) {
     res.status(401).json({ error: 'Please sign in' });
     return null;
   }
+  if (roles && !roles.includes(rows[0].role)) {
+    res.status(403).json({ error: 'You do not have access to this', role: rows[0].role });
+    return null;
+  }
   return rows[0];
 }
+
+// Secret for the Google Sheets IMPORTDATA link. shortcut: derived from SESSION_SECRET, so it only changes if that does.
+export const sheetToken = (secret = process.env.SESSION_SECRET) => sign('payout-sheet', secret);
+
+export const TDS_RATE = 0.1;
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Approved invoices -> one payout row per employee per month: net salary (after 10% TDS) + reimbursements.
+// invoices: [{ userId, name, email, kind, date: 'YYYY-MM-DD', total }]
+export function buildRegister(invoices) {
+  const rows = new Map();
+  for (const inv of invoices) {
+    const month = inv.date.slice(0, 7);
+    const key = `${month}|${inv.userId}`;
+    if (!rows.has(key)) rows.set(key, { month, userId: inv.userId, name: inv.name, email: inv.email, salary: 0, reimbursement: 0 });
+    rows.get(key)[inv.kind === 'salary' ? 'salary' : 'reimbursement'] += Number(inv.total);
+  }
+  return [...rows.values()]
+    .map((r) => {
+      const tds = round2(r.salary * TDS_RATE);
+      const netSalary = round2(r.salary - tds);
+      const reimbursement = round2(r.reimbursement);
+      return { ...r, salary: round2(r.salary), tds, netSalary, reimbursement, payout: round2(netSalary + reimbursement) };
+    })
+    .sort((a, b) => a.month.localeCompare(b.month) || a.name.localeCompare(b.name));
+}
+
+// Text starting with = + - @ is prefixed with ' so spreadsheets don't run it as a formula.
+export async function registerRows(db, from, to) {
+  const invoices = await db`select i.user_id as "userId", i.kind, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.total::float8 as total,
+                                   u.email, coalesce(nullif(u.profile->>'name', ''), u.email) as name
+                            from invoices i join users u on u.id = i.user_id
+                            where i.status = 'approved' and i.invoice_date between ${from} and ${to}`;
+  return buildRegister(invoices);
+}
+
+const csvCell = (v) =>
+  typeof v === 'number' ? String(v) : `"${String(v ?? '').replace(/^[=+\-@]/, "'$&").replace(/"/g, '""')}"`;
+export const toCsv = (rows) => rows.map((r) => r.map(csvCell).join(',')).join('\n') + '\n';
+
+export const REGISTER_HEADER = ['Month', 'Employee', 'Email', 'Gross Salary', 'TDS (10%)', 'Net Salary', 'Reimbursements', 'Payout'];
+export const registerCsv = (rows) =>
+  toCsv([REGISTER_HEADER, ...rows.map((r) => [r.month, r.name, r.email, r.salary, r.tds, r.netSalary, r.reimbursement, r.payout])]);

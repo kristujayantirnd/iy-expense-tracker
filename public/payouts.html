@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invincible YOU · Payouts</title>
+  <link rel="icon" href="/iy-lockup.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Literata:wght@500;600;700&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    // Same Invincible YOU theme as index.html (slate scale flipped light, blue = IY purple).
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"Source Sans 3"', 'Arial', 'sans-serif'], serif: ['Literata', 'Georgia', 'serif'] },
+          colors: {
+            slate: { 100: '#1a1a1a', 200: '#1a1a1a', 300: '#364153', 400: '#484848', 500: '#6a7282', 600: '#8a8a8a', 700: '#e5e7eb', 800: '#f3f4f6', 900: '#ffffff', 950: '#fafafa' },
+            blue: { 50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087', 500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a' },
+            emerald: { 300: '#047857', 400: '#047857' }, amber: { 300: '#b45309', 400: '#b45309' }, red: { 300: '#cc0000', 400: '#cc0000' },
+          }
+        }
+      }
+    }
+  </script>
+  <style type="text/tailwindcss">
+    .card { @apply bg-white border border-slate-700 rounded-2xl shadow-sm; }
+    .inp { @apply w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60; }
+    .lbl { @apply block text-xs font-medium text-slate-300 mb-1; }
+    .btn { @apply px-3 py-2 rounded-lg text-xs font-semibold border border-slate-700 bg-white hover:bg-slate-800 text-slate-200 transition inline-flex items-center gap-1.5; }
+    .btn-primary { @apply px-3 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition inline-flex items-center gap-1.5; }
+    .th { @apply px-3 py-2 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap; }
+    .td { @apply px-3 py-2 text-sm border-t border-slate-700 whitespace-nowrap; }
+    .tab { @apply px-3 py-2 text-sm font-medium rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800 whitespace-nowrap; }
+    .tab.active { @apply bg-blue-50 text-blue-700; }
+  </style>
+  <style>
+    h1, h2, h3 { font-family: Literata, Georgia, serif; }
+    #printArea { display: none; }
+    @media print {
+      body > :not(#printArea) { display: none !important; }
+      #printArea { display: block !important; color: #000; font-family: 'Source Sans 3', Arial, sans-serif; }
+      @page { margin: 14mm; }
+    }
+    #printArea table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #printArea th, #printArea td { border: 1px solid #999; padding: 5px 7px; text-align: left; vertical-align: top; }
+    #printArea .num { text-align: right; }
+  </style>
+</head>
+<body class="min-h-full font-sans antialiased text-slate-200 bg-slate-950">
+
+  <header class="border-b border-slate-700 bg-white/90 sticky top-0 z-30 backdrop-blur-md">
+    <div class="max-w-6xl mx-auto px-4 flex items-center justify-between h-16 gap-3">
+      <div class="flex items-center gap-4 min-w-0">
+        <img src="/iy-lockup.png" alt="Invincible YOU" class="h-7 sm:h-9 w-auto">
+        <h1 class="hidden sm:block border-l border-slate-700 pl-4 text-base font-semibold text-slate-100">Payouts</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <a id="trackerLink" href="/" class="btn hidden"><i class="fa-solid fa-chart-pie"></i><span class="hidden sm:inline">Expense Tracker</span></a>
+        <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
+        <button onclick="logout()" title="Sign out" aria-label="Sign out" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
+          <i class="fa-solid fa-right-from-bracket"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6 space-y-4">
+    <nav id="tabs" class="flex gap-1 overflow-x-auto"></nav>
+
+    <!-- INVOICES (all roles) -->
+    <section id="tab-invoices" class="tab-panel card p-4 space-y-3 hidden">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 class="text-lg font-semibold text-slate-100">Invoices</h2>
+        <div class="flex flex-wrap gap-2">
+          <select id="statusFilter" onchange="renderInvoices()" class="inp !w-auto !py-1.5 text-xs">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+          </select>
+          <button data-role="employee" onclick="openInvoice('salary')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
+          <button data-role="employee" onclick="openInvoice('reimbursement')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full" id="invoiceTable"></table></div>
+    </section>
+
+    <!-- PROFILE (employee) -->
+    <section id="tab-profile" class="tab-panel card p-4 hidden">
+      <h2 class="text-lg font-semibold text-slate-100 mb-1">My Profile</h2>
+      <p class="text-xs text-slate-400 mb-4">These details print on every invoice you raise. Approved invoices keep the details they had when approved.</p>
+      <form onsubmit="saveProfile(event)" class="grid sm:grid-cols-2 gap-3">
+        <div><label class="lbl" for="p-name">Name *</label><input id="p-name" class="inp" required maxlength="300"></div>
+        <div><label class="lbl" for="p-phone">Contact number</label><input id="p-phone" class="inp" maxlength="300"></div>
+        <div class="sm:col-span-2"><label class="lbl" for="p-address">Address</label><textarea id="p-address" rows="2" class="inp" maxlength="300"></textarea></div>
+        <div><label class="lbl" for="p-pan">PAN</label><input id="p-pan" class="inp uppercase" maxlength="300"></div>
+        <div><label class="lbl" for="p-accountNumber">Bank account number</label><input id="p-accountNumber" class="inp" maxlength="300"></div>
+        <div><label class="lbl" for="p-bank">Bank</label><input id="p-bank" class="inp" maxlength="300"></div>
+        <div><label class="lbl" for="p-branch">Branch</label><input id="p-branch" class="inp" maxlength="300"></div>
+        <div><label class="lbl" for="p-ifsc">IFSC</label><input id="p-ifsc" class="inp uppercase" maxlength="300"></div>
+        <div>
+          <label class="lbl" for="p-signature">Signature (PNG/JPG, under 300 KB)</label>
+          <input id="p-signature" type="file" accept="image/png,image/jpeg" onchange="pickSignature(this)" class="text-xs">
+          <p id="sigStatus" class="text-xs text-slate-400 mt-1"></p>
+          <img id="sigPreview" alt="Signature preview" class="hidden mt-2 max-h-16 border border-slate-700 rounded">
+        </div>
+        <div class="sm:col-span-2"><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i>Save profile</button></div>
+      </form>
+    </section>
+
+    <!-- PAYOUT REGISTER (admin, management) -->
+    <section id="tab-register" class="tab-panel card p-4 space-y-3 hidden">
+      <div class="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-100">Payout Register</h2>
+          <p class="text-xs text-slate-400">Approved invoices only. Payout = salary − 10% TDS + reimbursements, per employee per month.</p>
+        </div>
+        <div class="flex flex-wrap items-end gap-2">
+          <div><label class="lbl" for="regFrom">From</label><input id="regFrom" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
+          <div><label class="lbl" for="regTo">To</label><input id="regTo" type="date" class="inp !py-1.5" onchange="loadRegister()"></div>
+          <button onclick="exportRegisterCsv()" class="btn"><i class="fa-solid fa-file-csv"></i>CSV</button>
+          <button onclick="printRegister()" class="btn"><i class="fa-solid fa-file-pdf"></i>PDF</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full" id="registerTable"></table></div>
+    </section>
+
+    <!-- LOGINS (admin) -->
+    <section id="tab-users" class="tab-panel card p-4 space-y-3 hidden">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-slate-100">Logins & Salaries</h2>
+        <button onclick="openUser()" class="btn-primary"><i class="fa-solid fa-user-plus"></i>Add login</button>
+      </div>
+      <div class="overflow-x-auto"><table class="w-full" id="userTable"></table></div>
+    </section>
+
+    <!-- EMPLOYER (admin) -->
+    <section id="tab-employer" class="tab-panel space-y-4 hidden">
+      <div class="card p-4">
+        <h2 class="text-lg font-semibold text-slate-100 mb-1">Employer Details</h2>
+        <p class="text-xs text-slate-400 mb-4">Printed on every invoice as the billed party.</p>
+        <form onsubmit="saveEmployer(event)" class="grid sm:grid-cols-2 gap-3">
+          <div class="sm:col-span-2"><label class="lbl" for="e-companyName">Company name</label><input id="e-companyName" class="inp" maxlength="300"></div>
+          <div><label class="lbl" for="e-gstin">GSTIN</label><input id="e-gstin" class="inp uppercase" maxlength="300"></div>
+          <div><label class="lbl" for="e-pan">PAN</label><input id="e-pan" class="inp uppercase" maxlength="300"></div>
+          <div><label class="lbl" for="e-accountNumber">Account number</label><input id="e-accountNumber" class="inp" maxlength="300"></div>
+          <div><label class="lbl" for="e-bank">Bank</label><input id="e-bank" class="inp" maxlength="300"></div>
+          <div><label class="lbl" for="e-ifsc">IFSC</label><input id="e-ifsc" class="inp uppercase" maxlength="300"></div>
+          <div><label class="lbl" for="e-micr">MICR code</label><input id="e-micr" class="inp" maxlength="300"></div>
+          <div class="sm:col-span-2"><label class="lbl" for="e-bankAddress">Bank address</label><textarea id="e-bankAddress" rows="2" class="inp" maxlength="300"></textarea></div>
+          <div class="sm:col-span-2"><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i>Save employer details</button></div>
+        </form>
+      </div>
+      <div class="card p-4 space-y-2">
+        <h2 class="text-lg font-semibold text-slate-100">Google Sheet</h2>
+        <p class="text-xs text-slate-400">Paste this formula into cell A1 of a sheet. It lists every month's payout register and Google refreshes it about every hour. Add <code>&amp;month=2026-11</code> inside the link for one month only. Anyone with this link can read the payouts, so share the sheet carefully.</p>
+        <div class="flex gap-2">
+          <input id="sheetFormula" readonly class="inp font-mono text-xs" aria-label="Google Sheets formula">
+          <button onclick="copySheetFormula()" class="btn"><i class="fa-solid fa-copy"></i>Copy</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- INVOICE MODAL -->
+  <div id="invoiceModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
+    <form onsubmit="saveInvoice(event)" class="card w-full max-w-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 id="invoiceTitle" class="text-lg font-semibold text-slate-100"></h3>
+        <button type="button" onclick="closeModal('invoiceModal')" aria-label="Close" class="p-1 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3">
+        <div><label class="lbl">Invoice number</label><input id="invNumber" class="inp" disabled></div>
+        <div><label class="lbl" for="invDate">Invoice date</label><input id="invDate" type="date" required class="inp" oninput="renderInvoiceItems()"></div>
+      </div>
+      <div id="invItems"></div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeModal('invoiceModal')" class="btn">Cancel</button>
+        <button class="btn-primary"><i class="fa-solid fa-paper-plane"></i>Submit for approval</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- REJECT MODAL -->
+  <div id="rejectModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
+    <form onsubmit="submitReject(event)" class="card w-full max-w-md p-5 space-y-3">
+      <h3 class="text-lg font-semibold text-slate-100">Reject invoice</h3>
+      <div><label class="lbl" for="rejectNote">Reason (the employee sees this)</label><textarea id="rejectNote" rows="3" maxlength="500" class="inp"></textarea></div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeModal('rejectModal')" class="btn">Cancel</button>
+        <button class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white">Reject</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- USER MODAL -->
+  <div id="userModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
+    <form onsubmit="saveUser(event)" class="card w-full max-w-md p-5 space-y-3">
+      <h3 id="userTitle" class="text-lg font-semibold text-slate-100"></h3>
+      <div><label class="lbl" for="u-email">Email</label><input id="u-email" type="email" required class="inp"></div>
+      <div><label class="lbl" for="u-role">Role</label>
+        <select id="u-role" class="inp"><option value="employee">Employee</option><option value="management">Management</option><option value="admin">Admin</option></select>
+      </div>
+      <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices</label><input id="u-salary" type="number" min="0" step="0.01" class="inp"></div>
+      <div><label class="lbl" for="u-password" id="u-passwordLabel">Password</label><input id="u-password" type="password" minlength="8" autocomplete="new-password" class="inp"></div>
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeModal('userModal')" class="btn">Cancel</button>
+        <button class="btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- SIGN IN -->
+  <div id="loginOverlay" class="fixed inset-0 bg-slate-950 z-[60] flex items-center justify-center p-4 hidden">
+    <form onsubmit="submitLogin(event)" class="card w-full max-w-sm p-6 space-y-4">
+      <div class="text-center space-y-2">
+        <img src="/iy-lockup.png" alt="Invincible YOU" class="h-10 mx-auto">
+        <h2 class="text-lg font-semibold text-slate-100">Sign in to Payouts</h2>
+      </div>
+      <div><label for="loginEmail" class="lbl">Email</label><input type="email" id="loginEmail" required autocomplete="username" class="inp"></div>
+      <div><label for="loginPassword" class="lbl">Password</label><input type="password" id="loginPassword" required autocomplete="current-password" class="inp"></div>
+      <p id="loginError" role="alert" class="text-xs text-red-400 min-h-[1rem]"></p>
+      <button class="btn-primary w-full justify-center">Sign in</button>
+    </form>
+  </div>
+
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-[70] space-y-2 pointer-events-none" aria-live="polite"></div>
+  <div id="printArea"></div>
+
+  <script>
+    let state = null;
+    let currentTab = null;
+    let editing = null;      // invoice being edited/created: { id, kind, number }
+    let lineItems = [];      // reimbursement rows in the modal
+    let pendingSignature;    // undefined = unchanged
+    let rejectId = null;
+    let registerRows = [];
+
+    const TABS = {
+      admin: [['invoices', 'Invoices'], ['register', 'Payout Register'], ['users', 'Logins & Salaries'], ['employer', 'Employer & Sheet']],
+      management: [['invoices', 'Invoices'], ['register', 'Payout Register']],
+      employee: [['invoices', 'My Invoices'], ['profile', 'My Profile']],
+    };
+    const PROFILE_FIELDS = ['name', 'address', 'phone', 'accountNumber', 'branch', 'bank', 'ifsc', 'pan'];
+    const EMPLOYER_FIELDS = ['companyName', 'accountNumber', 'bank', 'ifsc', 'micr', 'bankAddress', 'gstin', 'pan'];
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const rs = (n) => 'Rs. ' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const showDate = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    const invNo = (inv) => (inv.kind === 'salary' ? 'SAL-' : 'RMB-') + String(inv.number).padStart(4, '0');
+    const kindLabel = (k) => (k === 'salary' ? 'Salary' : 'Reimbursement');
+    const sumItems = (items) => Math.round(items.reduce((s, it) => s + (Number(it.amount) || 0) * 100, 0)) / 100;
+    const closeModal = (id) => $(id).classList.add('hidden');
+    const openModal = (id) => $(id).classList.remove('hidden');
+
+    async function api(method, query = '', body) {
+      const res = await fetch('/api/payouts' + query, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) { showLogin(); throw new Error('Please sign in'); }
+      if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
+      return data;
+    }
+
+    // POST an action, refresh state; returns true on success.
+    async function post(body, okMsg) {
+      try {
+        apply(await api('POST', '', body));
+        if (okMsg) toast(okMsg, 'success');
+        return true;
+      } catch (e) {
+        toast(e.message, 'error');
+        return false;
+      }
+    }
+
+    async function load() {
+      try {
+        apply(await api('GET'));
+        $('loginOverlay').classList.add('hidden');
+      } catch (e) {
+        if (e.message !== 'Please sign in') toast(e.message, 'error');
+      }
+    }
+
+    function apply(data) {
+      const firstLoad = !state || state.me.id !== data.me.id;
+      state = data;
+      $('currentUser').innerText = data.me.email;
+      $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
+      document.querySelectorAll('[data-role]').forEach((el) => el.classList.toggle('hidden', el.dataset.role !== data.me.role));
+      $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
+      if (firstLoad) fillForms();
+      renderInvoices();
+      renderUsers();
+      showTab(firstLoad || !TABS[data.me.role].some(([k]) => k === currentTab) ? TABS[data.me.role][0][0] : currentTab);
+    }
+
+    function fillForms() {
+      const p = state.me.profile || {};
+      PROFILE_FIELDS.forEach((f) => ($('p-' + f).value = p[f] || ''));
+      pendingSignature = undefined;
+      $('p-signature').value = '';
+      $('sigPreview').classList.add('hidden');
+      $('sigStatus').innerText = state.me.hasSignature ? 'A signature is saved. Choose a file to replace it.' : 'No signature saved yet.';
+      EMPLOYER_FIELDS.forEach((f) => ($('e-' + f).value = state.employer[f] || ''));
+      if (state.sheetToken) {
+        $('sheetFormula').value = `=IMPORTDATA("${location.origin}/api/payout-sheet?token=${state.sheetToken}")`;
+      }
+      const now = new Date();
+      $('regFrom').value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      $('regTo').value = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    }
+
+    function showTab(tab) {
+      currentTab = tab;
+      document.querySelectorAll('.tab-panel').forEach((el) => el.classList.toggle('hidden', el.id !== 'tab-' + tab));
+      document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+      if (tab === 'register') loadRegister();
+    }
+
+    // INVOICES
+    function statusBadge(s) {
+      const cls = { pending: 'bg-amber-50 text-amber-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-red-50 text-red-700' }[s];
+      return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${s[0].toUpperCase() + s.slice(1)}</span>`;
+    }
+
+    function renderInvoices() {
+      if (!state) return;
+      const role = state.me.role;
+      const filter = $('statusFilter').value;
+      const list = state.invoices.filter((i) => !filter || i.status === filter);
+      const head = `<tr><th class="th">No.</th><th class="th">Type</th>${role !== 'employee' ? '<th class="th">Employee</th>' : ''}<th class="th">Date</th><th class="th text-right">Amount</th><th class="th">Status</th><th class="th"></th></tr>`;
+      const rows = list.map((i) => {
+        const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Print or save as PDF"><i class="fa-solid fa-print"></i>Print</button>`];
+        if (role === 'employee' && i.status !== 'approved') actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
+        if (role === 'admin' && i.status === 'pending') {
+          actions.push(`<button class="btn !text-emerald-700" onclick="approve(${i.id})"><i class="fa-solid fa-check"></i>Approve</button>`);
+          actions.push(`<button class="btn !text-red-700" onclick="reject(${i.id})"><i class="fa-solid fa-xmark"></i>Reject</button>`);
+        }
+        const note = i.status === 'rejected' && i.note ? `<div class="text-xs text-red-700 mt-1 whitespace-normal">${esc(i.note)}</div>` : '';
+        return `<tr><td class="td font-mono">${invNo(i)}</td><td class="td">${kindLabel(i.kind)}</td>
+          ${role !== 'employee' ? `<td class="td">${esc(i.name)}</td>` : ''}
+          <td class="td">${showDate(i.date)}</td><td class="td text-right">${rs(i.total)}</td>
+          <td class="td">${statusBadge(i.status)}${note}</td><td class="td"><div class="flex gap-1 justify-end">${actions.join('')}</div></td></tr>`;
+      }).join('');
+      $('invoiceTable').innerHTML = head + (rows || `<tr><td class="td text-slate-400" colspan="7">No invoices yet.</td></tr>`);
+    }
+
+    function openInvoice(kind, inv) {
+      editing = inv ? { id: inv.id, kind: inv.kind, number: invNo(inv) } : { kind, number: 'Assigned when submitted' };
+      $('invoiceTitle').innerText = (inv ? 'Edit ' : 'New ') + kindLabel(editing.kind) + ' Invoice';
+      $('invNumber').value = editing.number;
+      $('invDate').value = inv ? inv.date : ymd(new Date());
+      lineItems = inv && inv.kind === 'reimbursement' ? inv.items.map((it) => ({ ...it })) : [{ particulars: '', amount: '' }];
+      renderInvoiceItems();
+      openModal('invoiceModal');
+    }
+
+    function editInvoice(id) {
+      openInvoice(null, state.invoices.find((i) => i.id === id));
+    }
+
+    function renderInvoiceItems() {
+      const box = $('invItems');
+      if (editing.kind === 'salary') {
+        const d = $('invDate').value;
+        const period = d ? `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` : '—';
+        box.innerHTML = state.me.salary > 0
+          ? `<table class="w-full"><tr><th class="th">Particulars</th><th class="th text-right">Amount</th></tr>
+             <tr><td class="td">Salary for ${period}</td><td class="td text-right">${rs(state.me.salary)}</td></tr>
+             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(state.me.salary)}</td></tr></table>
+             <p class="text-xs text-slate-400 mt-2">Salary amount is set by the admin. 10% TDS is deducted in the payout.</p>`
+          : `<p class="text-sm text-red-700">Your salary has not been set by the admin yet.</p>`;
+        return;
+      }
+      const total = sumItems(lineItems);
+      box.innerHTML = `<table class="w-full"><tr><th class="th w-8">#</th><th class="th">Reimbursement particulars</th><th class="th w-40">Amount (Rs.)</th><th class="th w-8"></th></tr>
+        ${lineItems.map((it, n) => `<tr><td class="td text-slate-400">${n + 1}</td>
+          <td class="td"><input class="inp" required maxlength="300" aria-label="Particulars, row ${n + 1}" value="${esc(it.particulars)}" oninput="lineItems[${n}].particulars=this.value"></td>
+          <td class="td"><input class="inp text-right" required type="number" min="0.01" step="0.01" aria-label="Amount, row ${n + 1}" value="${esc(it.amount)}" oninput="lineItems[${n}].amount=this.value; updateTotals()"></td>
+          <td class="td">${lineItems.length > 1 ? `<button type="button" onclick="removeRow(${n})" aria-label="Remove row ${n + 1}" class="text-slate-400 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('')}
+        </table>
+        <button type="button" onclick="addRow()" class="btn mt-2"><i class="fa-solid fa-plus"></i>Add row</button>
+        <div class="mt-3 ml-auto max-w-xs text-sm space-y-1">
+          <div class="flex justify-between"><span class="text-slate-400">Subtotal</span><span id="invSubtotal">${rs(total)}</span></div>
+          <div class="flex justify-between font-semibold border-t border-slate-700 pt-1"><span>Grand Total</span><span id="invTotal">${rs(total)}</span></div>
+        </div>`;
+    }
+
+    function updateTotals() {
+      const t = rs(sumItems(lineItems));
+      $('invSubtotal').innerText = t;
+      $('invTotal').innerText = t;
+    }
+    function addRow() { lineItems.push({ particulars: '', amount: '' }); renderInvoiceItems(); }
+    function removeRow(n) { lineItems.splice(n, 1); renderInvoiceItems(); }
+
+    async function saveInvoice(e) {
+      e.preventDefault();
+      const body = { action: 'invoice', id: editing.id, kind: editing.kind, date: $('invDate').value };
+      if (editing.kind === 'reimbursement') body.items = lineItems.map((it) => ({ particulars: it.particulars, amount: Number(it.amount) }));
+      if (await post(body, 'Invoice submitted for approval')) closeModal('invoiceModal');
+    }
+
+    function approve(id) {
+      const inv = state.invoices.find((i) => i.id === id);
+      if (window.confirm(`Approve ${invNo(inv)} for ${inv.name} (${rs(inv.total)})? It can't be edited after this.`)) {
+        post({ action: 'decide', id, status: 'approved' }, 'Invoice approved');
+      }
+    }
+    function reject(id) { rejectId = id; $('rejectNote').value = ''; openModal('rejectModal'); }
+    async function submitReject(e) {
+      e.preventDefault();
+      if (await post({ action: 'decide', id: rejectId, status: 'rejected', note: $('rejectNote').value }, 'Invoice sent back to the employee')) closeModal('rejectModal');
+    }
+
+    // PRINT / PDF (the browser's print dialog has "Save as PDF")
+    function line(label, v) { return v ? `<div><b>${label}:</b> ${esc(v)}</div>` : ''; }
+
+    async function printInvoice(id) {
+      let inv;
+      try { inv = await api('GET', `?invoice=${id}`); } catch (e) { return toast(e.message, 'error'); }
+      const emp = inv.employee || {}, er = inv.employer || {};
+      $('printArea').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+          <div><div style="font-size:22px;font-weight:700">${kindLabel(inv.kind).toUpperCase()} INVOICE</div>
+            ${inv.status !== 'approved' ? `<div style="color:#b45309;font-weight:600">${inv.status.toUpperCase()} – NOT YET APPROVED</div>` : ''}</div>
+          <div style="text-align:right;font-size:13px"><div><b>Invoice No:</b> ${invNo(inv)}</div><div><b>Date:</b> ${showDate(inv.date)}</div></div>
+        </div>
+        <table style="margin-bottom:14px"><tr>
+          <td style="width:50%"><div style="font-weight:700;margin-bottom:4px">From</div>
+            <div style="font-weight:600">${esc(emp.name)}</div><div style="white-space:pre-line">${esc(emp.address)}</div>
+            ${line('Contact', emp.phone)}${line('Email', emp.email)}${line('PAN', emp.pan)}</td>
+          <td><div style="font-weight:700;margin-bottom:4px">Bill To</div>
+            <div style="font-weight:600">${esc(er.companyName)}</div>${line('GSTIN', er.gstin)}${line('PAN', er.pan)}</td>
+        </tr></table>
+        <table style="margin-bottom:14px">
+          <tr><th style="width:30px">#</th><th>Particulars</th><th class="num" style="width:140px">Amount (Rs.)</th></tr>
+          ${inv.items.map((it, n) => `<tr><td>${n + 1}</td><td>${esc(it.particulars)}</td><td class="num">${rs(it.amount).slice(4)}</td></tr>`).join('')}
+          <tr><td></td><td class="num"><b>Subtotal</b></td><td class="num">${rs(inv.total).slice(4)}</td></tr>
+          <tr><td></td><td class="num"><b>Grand Total</b></td><td class="num"><b>${rs(inv.total)}</b></td></tr>
+        </table>
+        <table style="margin-bottom:24px"><tr>
+          <td style="width:50%"><div style="font-weight:700;margin-bottom:4px">Pay to (employee bank)</div>
+            ${line('Account No', emp.accountNumber)}${line('Bank', emp.bank)}${line('Branch', emp.branch)}${line('IFSC', emp.ifsc)}</td>
+          <td><div style="font-weight:700;margin-bottom:4px">Employer bank</div>
+            ${line('Account No', er.accountNumber)}${line('Bank', er.bank)}${line('IFSC', er.ifsc)}${line('MICR', er.micr)}${line('Address', er.bankAddress)}</td>
+        </tr></table>
+        <div style="text-align:right">
+          ${emp.signature ? `<img src="${esc(emp.signature)}" alt="Signature" style="max-height:60px;display:inline-block">` : '<div style="height:60px"></div>'}
+          <div style="border-top:1px solid #000;display:inline-block;padding-top:4px;min-width:200px">${esc(emp.name)}</div>
+        </div>`;
+      window.print();
+    }
+
+    // PAYOUT REGISTER
+    async function loadRegister() {
+      const from = $('regFrom').value, to = $('regTo').value;
+      if (!from || !to) return;
+      try {
+        registerRows = (await api('GET', `?view=register&from=${from}&to=${to}`)).rows;
+      } catch (e) { return toast(e.message, 'error'); }
+      const sum = (k) => registerRows.reduce((s, r) => s + r[k] * 100, 0) / 100;
+      const cols = ['salary', 'tds', 'netSalary', 'reimbursement', 'payout'];
+      $('registerTable').innerHTML = `<tr><th class="th">Month</th><th class="th">Employee</th><th class="th text-right">Gross Salary</th><th class="th text-right">TDS (10%)</th><th class="th text-right">Net Salary</th><th class="th text-right">Reimbursements</th><th class="th text-right">Payout</th></tr>`
+        + (registerRows.map((r) => `<tr><td class="td">${r.month}</td><td class="td">${esc(r.name)}</td>${cols.map((k) => `<td class="td text-right ${k === 'payout' ? 'font-semibold' : ''}">${rs(r[k])}</td>`).join('')}</tr>`).join('')
+          || `<tr><td class="td text-slate-400" colspan="7">No approved invoices in this date range.</td></tr>`)
+        + (registerRows.length ? `<tr class="font-semibold"><td class="td" colspan="2">Total</td>${cols.map((k) => `<td class="td text-right">${rs(sum(k))}</td>`).join('')}</tr>` : '');
+    }
+
+    function exportRegisterCsv() {
+      const cell = (v) => (typeof v === 'number' ? v : `"${String(v).replace(/^[=+\-@]/, "'$&").replace(/"/g, '""')}"`);
+      const rows = [['Month', 'Employee', 'Email', 'Gross Salary', 'TDS (10%)', 'Net Salary', 'Reimbursements', 'Payout'],
+        ...registerRows.map((r) => [r.month, r.name, r.email, r.salary, r.tds, r.netSalary, r.reimbursement, r.payout])];
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([rows.map((r) => r.map(cell).join(',')).join('\n') + '\n'], { type: 'text/csv' }));
+      a.download = `payout-register_${$('regFrom').value}_to_${$('regTo').value}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function printRegister() {
+      const cols = ['salary', 'tds', 'netSalary', 'reimbursement', 'payout'];
+      const sum = (k) => registerRows.reduce((s, r) => s + r[k] * 100, 0) / 100;
+      $('printArea').innerHTML = `<div style="font-size:20px;font-weight:700">Payout Register</div>
+        <div style="margin-bottom:12px">${esc(state.employer.companyName)} · ${showDate($('regFrom').value)} to ${showDate($('regTo').value)}</div>
+        <table><tr><th>Month</th><th>Employee</th><th class="num">Gross Salary</th><th class="num">TDS (10%)</th><th class="num">Net Salary</th><th class="num">Reimbursements</th><th class="num">Payout</th></tr>
+        ${registerRows.map((r) => `<tr><td>${r.month}</td><td>${esc(r.name)}</td>${cols.map((k) => `<td class="num">${rs(r[k])}</td>`).join('')}</tr>`).join('')}
+        <tr><td colspan="2"><b>Total</b></td>${cols.map((k) => `<td class="num"><b>${rs(sum(k))}</b></td>`).join('')}</tr></table>`;
+      window.print();
+    }
+
+    // PROFILE / EMPLOYER / LOGINS
+    function pickSignature(input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 300 * 1024) { input.value = ''; return toast('Signature must be under 300 KB', 'error'); }
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingSignature = reader.result;
+        $('sigPreview').src = reader.result;
+        $('sigPreview').classList.remove('hidden');
+        $('sigStatus').innerText = 'New signature, saved when you click Save profile.';
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function saveProfile(e) {
+      e.preventDefault();
+      const profile = Object.fromEntries(PROFILE_FIELDS.map((f) => [f, $('p-' + f).value]));
+      if (pendingSignature !== undefined) profile.signature = pendingSignature;
+      if (await post({ action: 'profile', profile }, 'Profile saved')) fillForms();
+    }
+
+    function saveEmployer(e) {
+      e.preventDefault();
+      post({ action: 'employer', employer: Object.fromEntries(EMPLOYER_FIELDS.map((f) => [f, $('e-' + f).value])) }, 'Employer details saved');
+    }
+
+    function copySheetFormula() {
+      navigator.clipboard.writeText($('sheetFormula').value).then(() => toast('Formula copied', 'success'), () => $('sheetFormula').select());
+    }
+
+    function renderUsers() {
+      if (!state || state.me.role !== 'admin') return;
+      $('userTable').innerHTML = `<tr><th class="th">Email</th><th class="th">Name</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th"></th></tr>`
+        + state.users.map((u) => `<tr><td class="td">${esc(u.email)}</td><td class="td">${esc(u.name || '—')}</td><td class="td capitalize">${u.role}</td>
+          <td class="td text-right">${u.role === 'employee' ? rs(u.salary) : '—'}</td>
+          <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
+    }
+
+    let editingUserId = null;
+    function openUser(id) {
+      const u = id ? state.users.find((x) => x.id === id) : null;
+      editingUserId = u ? u.id : null;
+      $('userTitle').innerText = u ? 'Edit login' : 'Add login';
+      $('u-email').value = u ? u.email : '';
+      $('u-email').disabled = Boolean(u);
+      $('u-role').value = u ? u.role : 'employee';
+      $('u-salary').value = u ? u.salary : '';
+      $('u-password').value = '';
+      $('u-password').required = !u;
+      $('u-passwordLabel').innerText = u ? 'New password (leave blank to keep)' : 'Password (8+ characters)';
+      openModal('userModal');
+    }
+
+    async function saveUser(e) {
+      e.preventDefault();
+      const user = { id: editingUserId, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value };
+      if (await post({ action: 'user', user }, 'Login saved')) closeModal('userModal');
+    }
+
+    // SIGN IN / OUT
+    function showLogin() {
+      $('loginOverlay').classList.remove('hidden');
+      $('loginEmail').focus();
+    }
+
+    async function submitLogin(e) {
+      e.preventDefault();
+      $('loginError').innerText = '';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: $('loginEmail').value, password: $('loginPassword').value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { $('loginError').innerText = data.error || 'Sign in failed'; return; }
+      } catch {
+        $('loginError').innerText = 'Could not reach the server';
+        return;
+      }
+      $('loginPassword').value = '';
+      load();
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+      location.reload();
+    }
+
+    function toast(msg, type = 'info') {
+      const cls = { success: 'border-emerald-500 text-emerald-700', error: 'border-red-500 text-red-700', info: 'border-blue-500 text-blue-700' }[type];
+      const el = document.createElement('div');
+      el.className = `pointer-events-auto bg-white border ${cls} px-4 py-2.5 rounded-xl shadow-xl text-sm font-medium`;
+      el.innerText = msg;
+      $('toastContainer').appendChild(el);
+      setTimeout(() => el.remove(), 3500);
+    }
+
+    load();
+  </script>
+</body>
+</html>
