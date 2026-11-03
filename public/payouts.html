@@ -59,6 +59,7 @@
       </div>
       <div class="flex items-center gap-2">
         <a id="trackerLink" href="/" class="btn hidden"><i class="fa-solid fa-chart-pie"></i><span class="hidden sm:inline">Expense Tracker</span></a>
+        <a id="projectLink" href="https://simis-project-tracker.vercel.app/" target="_blank" rel="noopener" class="btn hidden" title="Project Tracker (opens in a new tab)" aria-label="Project Tracker, opens in a new tab"><i class="fa-solid fa-diagram-project"></i><span class="hidden sm:inline">Project Tracker</span></a>
         <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
         <button onclick="openPassword()" title="Change password" aria-label="Change password" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-key"></i>
@@ -419,6 +420,7 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
+      $('projectLink').classList.toggle('hidden', data.me.role === 'employee');
       $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();

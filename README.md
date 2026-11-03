@@ -1,6 +1,6 @@
 # iy-expense-tracker
 
-Team & category expense allocation tracker. Static page (`public/index.html`) + Vercel functions (`api/`) + Neon Postgres.
+Team & category expense allocation tracker, with a Payouts module and a launcher (header button, Admin and Management) for the separate Project Tracker at https://simis-project-tracker.vercel.app/ (its own sign-in). Static page (`public/index.html`) + Vercel functions (`api/`) + Neon Postgres.
 
 Live: https://iy-expense-tracker.vercel.app — pushing to `main` deploys to production.
 
