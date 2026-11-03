@@ -83,7 +83,7 @@ async function readState(db, me) {
               to_char(r.effective_date, 'YYYY-MM-DD') as "effectiveDate", r.note, to_char(r.created_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as "recordedOn",
               coalesce(nullif(c.name, ''), c.email, '') as "recordedBy"
        from salary_revisions r left join users c on c.id = r.created_by
-       where ${me.role === 'admin'} or r.user_id = ${me.id}
+       where ${me.role !== 'employee'} or r.user_id = ${me.id}
        order by r.user_id, r.effective_date, r.id`,
   ]);
   const { signature, ...profile } = me.profile || {};

@@ -26,10 +26,10 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 | Role | Extra access |
 |---|---|
 | Admin | Everything: expense tracker, employer details, logins & salaries, approve/reject invoices, payout register |
-| Management | View the expense tracker, all invoices and the payout register; export CSV/PDF |
+| Management | Lands on the expense tracker after signing in. Views all invoices, the payout register and Employees Salary (salary history); exports CSV/PDF |
 | Employee | None: Payouts page only, own profile and invoices |
 
-**Salary revisions:** changing a login's salary asks for the date it takes effect (and an optional note) and is kept in **Salary History** (Logins & Salaries). Salary invoices use the salary in effect on the invoice date; the tracker and the logins list show today's salary (with any upcoming one). Each login gets a starting record the first time `setup-db` runs.
+**Salary revisions:** changing a login's salary asks for the date it takes effect (and an optional note) and is kept in **Salary History** (the **Employees Salary** tab, for Admin and Management). Salary invoices use the salary in effect on the invoice date; the tracker and the logins list show today's salary (with any upcoming one). Each login gets a starting record the first time `setup-db` runs.
 
 Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inactive login can't sign in, and anyone already signed in is locked out on their next click. Their invoices are kept. Admins can't deactivate themselves.
 

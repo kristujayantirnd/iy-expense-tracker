@@ -162,16 +162,18 @@
         <button onclick="openUser()" class="btn-primary"><i class="fa-solid fa-user-plus"></i>Add login</button>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="userTable"></table></div>
-      <div class="border-t border-slate-700 pt-4 space-y-3">
-        <div class="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <h3 class="text-base font-semibold text-slate-100">Salary History</h3>
-            <p class="text-xs text-slate-400">Every salary revision with its effective date. Record a hike by editing the login's salary.</p>
-          </div>
-          <select id="historyUser" onchange="renderSalaryHistory()" class="inp !w-auto !py-1.5 text-xs" aria-label="Show salary history for"></select>
+    </section>
+
+    <!-- EMPLOYEES SALARY (admin, management): salary revision history -->
+    <section id="tab-salaries" class="tab-panel card p-4 space-y-3 hidden">
+      <div class="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 class="text-lg font-semibold text-slate-100">Employees Salary</h2>
+          <p class="text-xs text-slate-400">Salary History: every salary revision with its effective date.<span id="historyHint"> Record a hike by editing the login's salary in Logins &amp; Salaries.</span></p>
         </div>
-        <div class="overflow-x-auto"><table class="w-full" id="historyTable"></table></div>
+        <select id="historyUser" onchange="renderSalaryHistory()" class="inp !w-auto !py-1.5 text-xs" aria-label="Show salary history for"></select>
       </div>
+      <div class="overflow-x-auto"><table class="w-full" id="historyTable"></table></div>
     </section>
 
     <!-- EMPLOYER (admin) -->
@@ -358,8 +360,8 @@
     let invoicePage = 1;
 
     const TABS = {
-      admin: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['users', 'Logins & Salaries']],
-      management: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register']],
+      admin: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['salaries', 'Employees Salary'], ['users', 'Logins & Salaries']],
+      management: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['salaries', 'Employees Salary']],
       employee: [['invoices', 'My Invoices'], ['profile', 'My Profile']],
     };
     const PROFILE_FIELDS = ['name', 'address', 'phone', 'accountNumber', 'branch', 'bank', 'ifsc', 'pan'];
@@ -948,7 +950,8 @@ function doPost(e) {
     }
 
     function renderSalaryHistory() {
-      if (!state || state.me.role !== 'admin') return;
+      if (!state || state.me.role === 'employee') return;
+      $('historyHint').classList.toggle('hidden', state.me.role !== 'admin');
       const pick = $('historyUser');
       const keep = pick.value;
       pick.innerHTML = '<option value="">All employees</option>' + state.users.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}</option>`).join('');
@@ -1025,6 +1028,7 @@ function doPost(e) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { $('loginError').innerText = data.error || 'Sign in failed'; return; }
+        if (data.role === 'management') { location.href = '/'; return; } // Management's home is the Expense Tracker
       } catch {
         $('loginError').innerText = 'Could not reach the server';
         return;
