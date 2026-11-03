@@ -31,7 +31,7 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 
 ## Payouts (`/payouts.html`)
 
-- Employees raise **salary invoices** (pick a date; amount = salary set by admin; one per month) and **reimbursement invoices** (line items, totals calculated). Numbers run in two company-wide sequences: `SAL-0001…` and `RMB-0001…`.
+- Employees raise **salary invoices** (pick a date; amount = salary set by admin; one per month) and **reimbursements**. Reimbursements collect on **one open invoice per employee**: each submission adds rows stamped with the day they were entered, and the invoice date is the latest row's date. Numbers run in two company-wide sequences: `SAL-0001…` (given on submission) and `RMB-0001…` (given on approval, so no gaps). After approval the next submission starts a new invoice.
 - Every reimbursement row needs a **bill PDF**: uploaded (max 2 MB, stored privately in Vercel Blob) or a Google Drive link shared as *Anyone with the link can view*. The invoice's **PDF** button gives one file: invoice page + all bill pages in row order.
 - Admin → *Settings* (gear icon) → **Bill Storage** shows Blob usage (free plan: 1 GB) and deletes uploaded bills older than 3 months. Their invoices' PDFs then show a "bill deleted" page; Drive bills are untouched.
 - Admin approves (invoice is then locked) or rejects with a reason (employee can edit and resubmit).

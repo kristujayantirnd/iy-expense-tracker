@@ -95,4 +95,11 @@ alter table invoices add constraint invoices_status_check check (status in ('pen
 -- A cancelled salary invoice frees its month for a new one.
 drop index if exists one_salary_invoice_per_month;
 create unique index one_salary_invoice_per_month
-  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary' and status <> 'cancelled'
+  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary' and status <> 'cancelled';
+
+-- Reimbursements collect on one open invoice per employee and are numbered on approval.
+alter table invoices alter column number drop not null;
+update invoices set items = (select jsonb_agg(case when it ? 'date' then it else it || jsonb_build_object('date', to_char(invoices.invoice_date, 'YYYY-MM-DD')) end)
+                             from jsonb_array_elements(items) it)
+  where kind = 'reimbursement' and exists (select 1 from jsonb_array_elements(items) it where not it ? 'date');
+create unique index if not exists one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected')

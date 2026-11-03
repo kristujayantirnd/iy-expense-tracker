@@ -97,9 +97,13 @@ async function withCategories(db, items, picks) {
   });
 }
 
+// India date (YYYY-MM-DD): reimbursement rows are stamped with the day they were entered.
+const todayIST = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+// Rows keep the date they were first entered; a missing, bad or future date becomes today.
+const rowDate = (v) => (DATE.test(String(v || '')) && !Number.isNaN(Date.parse(v)) && v <= todayIST() ? v : todayIST());
+
 async function saveInvoice(db, me, body) {
   const admin = me.role === 'admin';
-  const invoiceDate = date(body.date);
   let kind = body.kind;
   let ownerId = me.id;
   let existing = null;
@@ -119,16 +123,31 @@ async function saveInvoice(db, me, body) {
   const self = owner.id === me.id;
   if (!owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
 
+  // Reimbursements collect on one open (pending or rejected) invoice per employee until it is approved.
+  let incoming = body.items;
+  if (kind === 'reimbursement' && !existing) {
+    const [open] = await db`select id, user_id, kind, status, items from invoices
+                            where user_id = ${owner.id} and kind = 'reimbursement' and status in ('pending', 'rejected')`;
+    if (open) {
+      existing = open;
+      body = { ...body, id: open.id };
+      incoming = [...open.items, ...(Array.isArray(body.items) ? body.items : [])];
+    }
+  }
+
   let items;
+  let invoiceDate;
   if (kind === 'salary') {
+    invoiceDate = date(body.date);
     if (!(owner.salary > 0)) throw new Bad(self ? 'Your salary has not been set by the admin yet' : "Set that employee's salary in Logins & Salaries first");
     const [y, m] = invoiceDate.split('-');
     items = [{ particulars: `Salary for ${MONTHS[Number(m) - 1]} ${y}`, amount: owner.salary }];
   } else if (kind === 'reimbursement') {
-    if (!Array.isArray(body.items) || !body.items.length) throw new Bad('Add at least one line item');
-    if (body.items.length > 50) throw new Bad('Too many line items');
-    items = body.items.map((it) => ({ particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
-    items = await withCategories(db, items, body.items.map((it) => it?.categoryId));
+    if (!Array.isArray(incoming) || !incoming.length) throw new Bad('Add at least one line item');
+    if (incoming.length > 50) throw new Bad('Too many line items on this invoice (50 at most)');
+    items = incoming.map((it) => ({ date: rowDate(it?.date), particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
+    items = await withCategories(db, items, incoming.map((it) => it?.categoryId));
+    invoiceDate = items.reduce((d, it) => (it.date > d ? it.date : d), items[0].date); // latest row
     // Uploaded bills must be the employee's own and still in storage.
     const ids = items.filter((it) => it.bill.upload).map((it) => it.bill.upload);
     const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${owner.id} and deleted_at is null` : [];
@@ -147,14 +166,15 @@ async function saveInvoice(db, me, body) {
                             where id = ${intId(body.id)} and status not in ('approved', 'cancelled') returning id`;
       if (!rows.length) throw new Bad('This invoice is approved and can no longer be edited');
     } else {
-      // Max + 1 (not a sequence) so failed submissions never leave gaps; unique (kind, number) catches races.
+      // Salary: max + 1 (not a sequence) so failed submissions never leave gaps; unique (kind, number) catches races.
+      // Reimbursement: numbered only when approved.
       await db`insert into invoices (user_id, kind, number, invoice_date, items, total, employer, employee)
-               select ${owner.id}, ${kind}, coalesce(max(number), 0) + 1, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}
+               select ${owner.id}, ${kind}, case when ${kind} = 'salary' then coalesce(max(number), 0) + 1 end, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}
                from invoices where kind = ${kind}`;
     }
   } catch (e) {
     if (e.code === '23505' && e.constraint === 'one_salary_invoice_per_month') throw new Bad(self ? 'You already have a salary invoice for that month' : 'That employee already has a salary invoice for that month');
-    if (e.code === '23505') throw new Bad('Someone submitted at the same moment, please submit again');
+    if (e.code === '23505') throw new Bad('Something was submitted at the same moment, please submit again');
     throw e;
   }
 }
@@ -195,7 +215,10 @@ async function act(db, me, body) {
           await db`update invoices set items = ${JSON.stringify(items)} where id = ${id} and status = 'pending'`;
         }
       }
-      const rows = await db`update invoices set status = ${body.status}, note = ${text(body.note, 500)}, decided_by = ${me.id}, decided_at = now()
+      // A reimbursement gets its number on approval (next in sequence, so no gaps).
+      const rows = await db`update invoices set status = ${body.status}, note = ${text(body.note, 500)}, decided_by = ${me.id}, decided_at = now(),
+                              number = case when number is null and ${body.status} = 'approved'
+                                            then (select coalesce(max(number), 0) + 1 from invoices where kind = 'reimbursement') else number end
                             where id = ${id} and status = 'pending' returning id`;
       if (!rows.length) throw new Bad('Only pending invoices can be approved or rejected');
       if (body.status === 'approved') await copyToDrive(db, rows[0].id);

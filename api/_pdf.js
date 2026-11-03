@@ -12,7 +12,7 @@ const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'O
 const clean = (s) => String(s ?? '').replace(/[^\n\x20-\x7E\xA0-\xFF]/g, '?');
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const showDate = (s) => `${s.slice(8, 10)} ${MONTH[Number(s.slice(5, 7)) - 1]} ${s.slice(0, 4)}`;
-export const invoiceNo = (inv) => (inv.kind === 'salary' ? 'SAL-' : 'RMB-') + String(inv.number).padStart(4, '0');
+export const invoiceNo = (inv) => (inv.number == null ? 'Not numbered yet' : (inv.kind === 'salary' ? 'SAL-' : 'RMB-') + String(inv.number).padStart(4, '0'));
 
 function wrap(font, size, text, width) {
   const lines = [];
@@ -80,12 +80,15 @@ export async function buildInvoicePdf(inv, loadBill) {
   );
 
   // Items table
-  const cNo = M + 6, cPart = M + 34, cAmt = M + W - 6, partW = W - 34 - 130;
+  // Reimbursement rows carry the date each was entered.
+  const dated = inv.items.some((it) => it.date);
+  const cNo = M + 6, cDate = M + 30, cPart = M + (dated ? 98 : 34), cAmt = M + W - 6, partW = W - (dated ? 98 : 34) - 130;
   const rowLine = () => page.drawLine({ start: { x: M, y }, end: { x: M + W, y }, color: GREY, thickness: 0.7 });
   const header = () => {
     ensure(22);
     rowLine();
     text('#', cNo, y - 14, { f: bold });
+    if (dated) text('Date', cDate, y - 14, { f: bold });
     text('Particulars', cPart, y - 14, { f: bold });
     right('Amount (Rs.)', cAmt, y - 14, { f: bold });
     y -= 20;
@@ -101,6 +104,7 @@ export async function buildInvoicePdf(inv, loadBill) {
       header();
     }
     text(String(n + 1), cNo, y - 14);
+    if (it.date) text(showDate(it.date), cDate, y - 14);
     lines.forEach((l, i) => text(l, cPart, y - 14 - i * 13));
     right(money(it.amount), cAmt, y - 14);
     y -= h;
