@@ -28,7 +28,11 @@ async function readState(db) {
     db`select id, name, budget::float8 as budget, color from categories order by created_at, id`,
     // Directory = every login (all are employees; Payouts > Logins & Salaries); the employees row 'u<userId>' adds designation + split.
     db`select 'u' || u.id as id, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name, coalesce(e.role, '') as role,
-              u.salary::float8 as "baseSalary", coalesce(e.allocations, '{}') as allocations
+              -- salary in effect today (same rule as payouts salaryOn); falls back to the defined salary
+              coalesce((select r.new_salary from salary_revisions r where r.user_id = u.id
+                          and (r.old_salary is null or r.effective_date <= (now() at time zone 'Asia/Kolkata')::date)
+                        order by case when r.old_salary is null then date '0001-01-01' else r.effective_date end desc, r.id desc limit 1),
+                       u.salary)::float8 as "baseSalary", coalesce(e.allocations, '{}') as allocations
        from users u left join employees e on e.id = 'u' || u.id
        order by 2`,
     db`select id, title, category_id as "categoryId", type, amount::float8 as amount, notes from expenses order by created_at, id`,

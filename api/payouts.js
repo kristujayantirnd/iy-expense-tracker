@@ -60,7 +60,7 @@ const getDrive = async (db) => {
 // List queries leave out signatures (large); the invoice PDF reads the full copy.
 async function readState(db, me) {
   const all = me.role !== 'employee';
-  const [invoices, categories, users] = await db.transaction([
+  const [invoices, categories, users, revisions] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
               i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
        from invoices i join users u on u.id = i.user_id
@@ -68,8 +68,23 @@ async function readState(db, me) {
        order by i.invoice_date desc, i.id desc`,
     db`select id, name from categories order by name`,
     all
-      ? db`select id, email, role, salary::float8 as salary, coalesce(nullif(name, ''), profile->>'name', '') as name, active from users order by active desc, role, 5, email`
+      ? db`select u.id, u.email, u.role, u.salary::float8 as "latestSalary", coalesce(nullif(u.name, ''), u.profile->>'name', '') as name, u.active,
+              coalesce(cur.new_salary, u.salary)::float8 as salary, nxt.new_salary::float8 as "nextSalary", to_char(nxt.effective_date, 'YYYY-MM-DD') as "nextFrom"
+           from users u
+           left join lateral (select new_salary from salary_revisions r where r.user_id = u.id
+                                and (r.old_salary is null or r.effective_date <= (now() at time zone 'Asia/Kolkata')::date)
+                              order by case when r.old_salary is null then date '0001-01-01' else r.effective_date end desc, r.id desc limit 1) cur on true
+           left join lateral (select new_salary, effective_date from salary_revisions r where r.user_id = u.id and r.old_salary is not null
+                                and r.effective_date > (now() at time zone 'Asia/Kolkata')::date
+                              order by r.effective_date, r.id limit 1) nxt on true
+           order by u.active desc, u.role, 5, u.email`
       : db`select 1 where false`,
+    db`select r.id, r.user_id as "userId", r.old_salary::float8 as "oldSalary", r.new_salary::float8 as "newSalary",
+              to_char(r.effective_date, 'YYYY-MM-DD') as "effectiveDate", r.note, to_char(r.created_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as "recordedOn",
+              coalesce(nullif(c.name, ''), c.email, '') as "recordedBy"
+       from salary_revisions r left join users c on c.id = r.created_by
+       where ${me.role === 'admin'} or r.user_id = ${me.id}
+       order by r.user_id, r.effective_date, r.id`,
   ]);
   const { signature, ...profile } = me.profile || {};
   return {
@@ -78,6 +93,7 @@ async function readState(db, me) {
     invoices,
     categories,
     users: all ? users : [],
+    revisions,
     sheetToken: me.role === 'admin' ? sheetToken() : undefined,
     drive: me.role === 'admin' ? { ...(await getDrive(db)), secret: driveToken() } : undefined,
   };
@@ -102,13 +118,22 @@ const todayIST = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0
 // Rows keep the date they were first entered; a missing, bad or future date becomes today.
 const rowDate = (v) => (DATE.test(String(v || '')) && !Number.isNaN(Date.parse(v)) && v <= todayIST() ? v : todayIST());
 
+// Salary in effect on a date: the latest revision effective on or before it. A starting salary (no previous
+// amount) counts from the very beginning, so a backdated hike still wins from its own date. No history: defined salary.
+async function salaryOn(db, userId, day, fallback) {
+  const [r] = await db`select new_salary::float8 as salary from salary_revisions
+                       where user_id = ${userId} and (old_salary is null or effective_date <= ${day})
+                       order by case when old_salary is null then date '0001-01-01' else effective_date end desc, id desc limit 1`;
+  return r ? r.salary : fallback;
+}
+
 async function saveInvoice(db, me, body) {
   const admin = me.role === 'admin';
   let kind = body.kind;
   let ownerId = me.id;
   let existing = null;
   if (body.id) {
-    [existing] = await db`select user_id, kind, status from invoices where id = ${intId(body.id)}`;
+    [existing] = await db`select user_id, kind, status, items from invoices where id = ${intId(body.id)}`;
     // Owners edit their own; the admin may also edit salary invoices (they can raise them for anyone).
     if (!existing || (existing.user_id !== me.id && !(admin && existing.kind === 'salary'))) throw new Bad('Invoice not found');
     if (LOCKED.includes(existing.status)) throw new Bad(`This invoice is ${existing.status} and can no longer be edited`);
@@ -140,9 +165,20 @@ async function saveInvoice(db, me, body) {
   let invoiceDate;
   if (kind === 'salary') {
     invoiceDate = date(body.date);
-    if (!(owner.salary > 0)) throw new Bad(self ? 'Your salary has not been set by the admin yet' : "Set that employee's salary in Logins & Salaries first");
+    // Amount = defined salary, unless the admin sets another; an admin-set amount survives the employee's own edits.
+    const defined = await salaryOn(db, owner.id, invoiceDate, owner.salary);
+    let amount = defined;
+    let adjusted = false;
+    if (admin && body.amount !== undefined && body.amount !== '') {
+      amount = money(body.amount);
+      adjusted = amount !== defined;
+    } else if (existing?.items?.[0]?.adjusted) {
+      amount = existing.items[0].amount;
+      adjusted = true;
+    }
+    if (!(amount > 0)) throw new Bad(self ? 'Your salary has not been set by the admin yet' : "Set that employee's salary in Logins & Salaries first");
     const [y, m] = invoiceDate.split('-');
-    items = [{ particulars: `Salary for ${MONTHS[Number(m) - 1]} ${y}`, amount: owner.salary }];
+    items = [{ particulars: `Salary for ${MONTHS[Number(m) - 1]} ${y}`, amount, ...(adjusted ? { adjusted: true } : {}) }];
   } else if (kind === 'reimbursement') {
     if (!Array.isArray(incoming) || !incoming.length) throw new Bad('Add at least one line item');
     if (incoming.length > 50) throw new Bad('Too many line items on this invoice (50 at most)');
@@ -279,10 +315,19 @@ async function act(db, me, body) {
       if (password && password.length < 8) throw new Bad('Password must be at least 8 characters');
       const name = text(u.name, 100, true);
       const active = u.active !== false;
+      const revNote = text(u.revisionNote, 300);
       if (u.id) {
         const id = intId(u.id);
         if (id === me.id && u.role !== 'admin') throw new Bad('You cannot remove your own admin access');
         if (id === me.id && !active) throw new Bad('You cannot deactivate your own login');
+        const [cur] = await db`select salary::float8 as salary from users where id = ${id}`;
+        if (!cur) throw new Bad('Login not found');
+        // A salary change is recorded as a revision with its effective date.
+        if (cur.salary !== salary) {
+          const effective = date(u.effectiveDate);
+          await db`insert into salary_revisions (user_id, old_salary, new_salary, effective_date, note, created_by)
+                   values (${id}, ${cur.salary > 0 ? cur.salary : null}, ${salary}, ${effective}, ${revNote}, ${me.id})`;
+        }
         await db`update users set name = ${name}, role = ${u.role}, salary = ${salary}, active = ${active} where id = ${id}`;
         if (password) await db`update users set password_hash = ${hashPassword(password)} where id = ${id}`;
         return;
@@ -293,6 +338,10 @@ async function act(db, me, body) {
       const rows = await db`insert into users (email, name, password_hash, role, salary, active) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${salary}, ${active})
                             on conflict (email) do nothing returning id`;
       if (!rows.length) throw new Bad('A login with that email already exists');
+      if (salary > 0) {
+        await db`insert into salary_revisions (user_id, old_salary, new_salary, effective_date, note, created_by)
+                 values (${rows[0].id}, null, ${salary}, ${u.effectiveDate ? date(u.effectiveDate) : todayIST()}, ${revNote || 'Starting salary'}, ${me.id})`;
+      }
       return;
     }
   }

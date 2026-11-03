@@ -105,4 +105,20 @@ update invoices set items = (select jsonb_agg(case when it ? 'date' then it else
 create unique index if not exists one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected');
 
 -- Inactive logins cannot sign in or use the app.
-alter table users add column if not exists active boolean not null default true
+alter table users add column if not exists active boolean not null default true;
+
+-- Salary revisions (hikes). old_salary is null for the starting salary.
+create table if not exists salary_revisions (
+  id serial primary key,
+  user_id int not null references users(id),
+  old_salary numeric,
+  new_salary numeric not null,
+  effective_date date not null,
+  note text not null default '',
+  created_by int references users(id),
+  created_at timestamptz not null default now()
+);
+-- Starting record for logins that have a salary but no history yet.
+insert into salary_revisions (user_id, old_salary, new_salary, effective_date, note)
+  select id, null, salary, (created_at at time zone 'Asia/Kolkata')::date, 'Starting salary'
+  from users u where salary > 0 and not exists (select 1 from salary_revisions r where r.user_id = u.id)

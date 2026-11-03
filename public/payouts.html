@@ -149,6 +149,16 @@
         <button onclick="openUser()" class="btn-primary"><i class="fa-solid fa-user-plus"></i>Add login</button>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="userTable"></table></div>
+      <div class="border-t border-slate-700 pt-4 space-y-3">
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h3 class="text-base font-semibold text-slate-100">Salary History</h3>
+            <p class="text-xs text-slate-400">Every salary revision with its effective date. Record a hike by editing the login's salary.</p>
+          </div>
+          <select id="historyUser" onchange="renderSalaryHistory()" class="inp !w-auto !py-1.5 text-xs" aria-label="Show salary history for"></select>
+        </div>
+        <div class="overflow-x-auto"><table class="w-full" id="historyTable"></table></div>
+      </div>
     </section>
 
     <!-- EMPLOYER (admin) -->
@@ -229,7 +239,7 @@
         <div><label class="lbl">Invoice number</label><input id="invNumber" class="inp" disabled></div>
         <div id="invDateBox"><label class="lbl" for="invDate">Invoice date</label><input id="invDate" type="date" required class="inp" oninput="renderInvoiceItems()"></div>
         <div id="invDateNote" class="hidden"><label class="lbl">Invoice date</label><p class="text-sm text-slate-200 py-2">Latest row's date. Numbered when approved.</p></div>
-        <div id="invUserBox" class="hidden"><label class="lbl" for="invUser">Employee</label><select id="invUser" class="inp" onchange="editing.userId = Number(this.value); renderInvoiceItems()"></select></div>
+        <div id="invUserBox" class="hidden"><label class="lbl" for="invUser">Employee</label><select id="invUser" class="inp" onchange="editing.userId = Number(this.value); editing.amount = null; renderInvoiceItems()"></select></div>
       </div>
       <div id="invItems"></div>
       <div class="flex justify-end gap-2">
@@ -276,7 +286,12 @@
       <div><label class="lbl" for="u-role">Role</label>
         <select id="u-role" class="inp"><option value="employee">Employee</option><option value="management">Management</option><option value="admin">Admin</option></select>
       </div>
-      <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices and in the Expense Tracker (all roles)</label><input id="u-salary" type="number" min="0" step="0.01" class="inp"></div>
+      <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices and in the Expense Tracker (all roles)</label><input id="u-salary" type="number" min="0" step="0.01" class="inp" oninput="toggleRevision()"></div>
+      <div id="u-revBox" class="hidden grid sm:grid-cols-2 gap-3 bg-blue-50 rounded-xl p-3">
+        <p class="sm:col-span-2 text-xs text-slate-300"><b>Salary revision</b>: <span id="u-revChange"></span>. It is recorded in Salary History; salary invoices dated from this day use the new amount.</p>
+        <div><label class="lbl" for="u-effective">Effective from</label><input id="u-effective" type="date" class="inp"></div>
+        <div><label class="lbl" for="u-revNote">Note (optional)</label><input id="u-revNote" maxlength="300" placeholder="e.g. Annual hike approved" class="inp"></div>
+      </div>
       <div><label class="lbl" for="u-password" id="u-passwordLabel">Password</label><input id="u-password" type="password" minlength="8" autocomplete="new-password" class="inp"></div>
       <label class="flex items-start gap-2 text-sm text-slate-200"><input id="u-active" type="checkbox" class="mt-1" checked>
         <span>Active<span class="block text-xs text-slate-400">Untick to block this person from signing in or using the app. Their invoices are kept.</span></span></label>
@@ -394,6 +409,7 @@
       if (firstLoad) fillForms();
       renderInvoices();
       renderUsers();
+      renderSalaryHistory();
       renderCancelList();
       const allowed = TABS[data.me.role].map(([k]) => k).concat(data.me.role === 'admin' ? ['employer'] : []);
       showTab(firstLoad || !allowed.includes(currentTab) ? allowed[0] : currentTab);
@@ -519,6 +535,7 @@
       }
       editing = inv ? { id: inv.id, kind: inv.kind, number: inv.number == null ? 'Numbered when approved' : invNo(inv), userId: inv.userId }
         : { kind, number: kind === 'salary' ? 'Assigned when submitted' : 'Numbered when approved', userId: state.me.id };
+      editing.amount = inv && inv.kind === 'salary' ? inv.total : null; // null = the defined salary
       // Admin can raise (and edit) salary invoices for anyone.
       const pickUser = state.me.role === 'admin' && editing.kind === 'salary';
       $('invUserBox').classList.toggle('hidden', !pickUser);
@@ -551,11 +568,22 @@
         const d = $('invDate').value;
         const period = d ? `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` : '—';
         const self = editing.userId === state.me.id;
-        const salary = self ? state.me.salary : (state.users.find((u) => u.id === editing.userId) || {}).salary;
-        box.innerHTML = salary > 0
+        const base = self ? state.me.salary : (state.users.find((u) => u.id === editing.userId) || {}).salary;
+        const salary = salaryOn(editing.userId, d || ymd(new Date()), base); // salary in effect on the invoice date
+        const amount = editing.amount ?? salary;
+        if (state.me.role === 'admin') {
+          // Admin may invoice a different amount than the defined salary.
+          box.innerHTML = `<table class="w-full"><tr><th class="th">Particulars</th><th class="th text-right w-48">Amount (Rs.)</th></tr>
+             <tr><td class="td">Salary for ${period}</td><td class="td"><input id="invAmount" type="number" min="0.01" step="0.01" required class="inp text-right" aria-label="Salary invoice amount"
+               value="${amount > 0 ? amount : ''}" oninput="editing.amount = this.value === '' ? null : Number(this.value); $('invSalaryTotal').innerText = rs(this.value)"></td></tr>
+             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold" id="invSalaryTotal">${rs(amount)}</td></tr></table>
+             <p class="text-xs text-slate-400 mt-2">Defined salary: ${salary > 0 ? rs(salary) : 'not set'}. Change the amount if this month's pay differs. 10% TDS is deducted in the payout.</p>`;
+          return;
+        }
+        box.innerHTML = amount > 0
           ? `<table class="w-full"><tr><th class="th">Particulars</th><th class="th text-right">Amount</th></tr>
-             <tr><td class="td">Salary for ${period}</td><td class="td text-right">${rs(salary)}</td></tr>
-             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(salary)}</td></tr></table>
+             <tr><td class="td">Salary for ${period}</td><td class="td text-right">${rs(amount)}</td></tr>
+             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(amount)}</td></tr></table>
              <p class="text-xs text-slate-400 mt-2">Salary amount is set by the admin. 10% TDS is deducted in the payout.</p>`
           : `<p class="text-sm text-red-700">${self ? 'Your salary has not been set by the admin yet.' : "This employee's salary is not set yet (Logins & Salaries)."}</p>`;
         return;
@@ -587,6 +615,7 @@
     async function saveInvoice(e) {
       e.preventDefault();
       const body = { action: 'invoice', id: editing.id, kind: editing.kind, date: $('invDate').value, userId: editing.userId };
+      if (editing.kind === 'salary' && state.me.role === 'admin') body.amount = $('invAmount').value;
       if (editing.kind === 'reimbursement') {
         if (lineItems.some((it) => !it.bill || it.bill.busy)) return toast('Attach a bill (PDF upload or Drive link) to every row', 'error');
         body.items = lineItems.map((it) => ({ date: it.date, particulars: it.particulars, amount: Number(it.amount), bill: it.bill, categoryId: it.categoryId || '' }));
@@ -851,12 +880,55 @@ function doPost(e) {
       if (!state || state.me.role !== 'admin') return;
       $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th">Status</th><th class="th"></th></tr>`
         + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td capitalize">${u.role}</td>
-          <td class="td text-right">${rs(u.salary)}</td>
+          <td class="td text-right">${rs(u.salary)}${u.nextSalary != null ? `<div class="text-xs text-blue-700">${rs(u.nextSalary)} from ${showDate(u.nextFrom)}</div>` : ''}</td>
           <td class="td"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${u.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-800 text-slate-400'}">${u.active ? 'Active' : 'Inactive'}</span></td>
           <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
     }
 
     let editingUserId = null;
+    // Changing an existing login's salary asks for the revision's effective date.
+    function toggleRevision() {
+      const orig = $('u-salary').dataset.original;
+      const now = Number($('u-salary').value || 0);
+      const changed = orig !== '' && Number(orig) !== now;
+      $('u-revBox').classList.toggle('hidden', !changed);
+      $('u-effective').required = changed;
+      if (changed) {
+        const diff = now - Number(orig);
+        $('u-revChange').innerText = `${rs(orig)} → ${rs(now)} (${diff >= 0 ? '+' : ''}${rs(diff).replace('Rs. -', '-Rs. ')}${Number(orig) > 0 ? `, ${diff >= 0 ? '+' : ''}${(diff / Number(orig) * 100).toFixed(1)}%` : ''})`;
+      }
+    }
+
+    // Salary in effect on a day (same rule as the server): latest revision effective on/before it;
+    // a starting salary counts from the beginning.
+    function salaryOn(userId, day, fallback) {
+      const key = (r) => (r.oldSalary == null ? '0001-01-01' : r.effectiveDate);
+      const list = (state.revisions || []).filter((r) => r.userId === userId && (r.oldSalary == null || r.effectiveDate <= day))
+        .sort((a, b) => key(a).localeCompare(key(b)) || a.id - b.id);
+      return list.length ? list[list.length - 1].newSalary : fallback;
+    }
+
+    function renderSalaryHistory() {
+      if (!state || state.me.role !== 'admin') return;
+      const pick = $('historyUser');
+      const keep = pick.value;
+      pick.innerHTML = '<option value="">All employees</option>' + state.users.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}</option>`).join('');
+      pick.value = keep;
+      const nameOf = (id) => { const u = state.users.find((x) => x.id === id); return u ? u.name || u.email : ''; };
+      const list = state.revisions.filter((r) => !pick.value || r.userId === Number(pick.value))
+        .slice().sort((a, b) => nameOf(a.userId).localeCompare(nameOf(b.userId)) || b.effectiveDate.localeCompare(a.effectiveDate) || b.id - a.id);
+      $('historyTable').innerHTML = `<tr><th class="th">Employee</th><th class="th">Effective from</th><th class="th text-right">Previous</th><th class="th text-right">Revised</th><th class="th text-right">Change</th><th class="th">Note</th><th class="th">Recorded</th></tr>`
+        + (list.map((r) => {
+          const diff = r.oldSalary == null ? null : r.newSalary - r.oldSalary;
+          const change = diff == null ? '<span class="text-slate-400">Starting salary</span>'
+            : `<span class="${diff >= 0 ? 'text-emerald-700' : 'text-red-700'}">${diff >= 0 ? '+' : '−'}${rs(Math.abs(diff))}${r.oldSalary > 0 ? ` (${diff >= 0 ? '+' : '−'}${Math.abs(diff / r.oldSalary * 100).toFixed(1)}%)` : ''}</span>`;
+          return `<tr><td class="td">${esc(nameOf(r.userId))}</td><td class="td">${showDate(r.effectiveDate)}</td>
+            <td class="td text-right">${r.oldSalary == null ? '—' : rs(r.oldSalary)}</td><td class="td text-right font-semibold">${rs(r.newSalary)}</td>
+            <td class="td text-right">${change}</td><td class="td whitespace-normal">${esc(r.note)}</td>
+            <td class="td text-xs text-slate-400">${showDate(r.recordedOn)}${r.recordedBy ? ' · ' + esc(r.recordedBy) : ''}</td></tr>`;
+        }).join('') || `<tr><td class="td text-slate-400" colspan="7">No salary revisions yet.</td></tr>`);
+    }
+
     function openUser(id) {
       const u = id ? state.users.find((x) => x.id === id) : null;
       editingUserId = u ? u.id : null;
@@ -867,7 +939,11 @@ function doPost(e) {
       $('u-role').value = u ? u.role : 'employee';
       $('u-active').checked = u ? u.active : true;
       $('u-active').disabled = Boolean(u && u.id === state.me.id);
-      $('u-salary').value = u ? u.salary : '';
+      $('u-salary').value = u ? u.latestSalary : '';
+      $('u-salary').dataset.original = u ? u.latestSalary : '';
+      $('u-effective').value = ymd(new Date());
+      $('u-revNote').value = '';
+      toggleRevision();
       $('u-password').value = '';
       $('u-password').required = !u;
       $('u-passwordLabel').innerText = u ? 'New password (leave blank to keep)' : 'Password (8+ characters)';
@@ -876,7 +952,8 @@ function doPost(e) {
 
     async function saveUser(e) {
       e.preventDefault();
-      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value, active: $('u-active').checked };
+      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value, active: $('u-active').checked,
+        effectiveDate: $('u-effective').value, revisionNote: $('u-revNote').value };
       if (await post({ action: 'user', user }, 'Login saved')) closeModal('userModal');
     }
 
