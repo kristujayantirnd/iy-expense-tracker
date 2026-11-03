@@ -29,6 +29,8 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 | Management | View the expense tracker, all invoices and the payout register; export CSV/PDF |
 | Employee | None: Payouts page only, own profile and invoices |
 
+Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inactive login can't sign in, and anyone already signed in is locked out on their next click. Their invoices are kept. Admins can't deactivate themselves.
+
 ## Payouts (`/payouts.html`)
 
 - Employees raise **salary invoices** (pick a date; amount = salary set by admin; one per month) and **reimbursements**. Reimbursements collect on **one open invoice per employee**: each submission adds rows stamped with the day they were entered, and the invoice date is the latest row's date. Numbers run in two company-wide sequences: `SAL-0001…` (given on submission) and `RMB-0001…` (given on approval, so no gaps). After approval the next submission starts a new invoice.
@@ -37,6 +39,7 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 - Admin approves (invoice is then locked) or rejects with a reason (employee can edit and resubmit).
 - Each reimbursement row can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change each row's category. The admin can also raise salary invoices for any employee.
 - **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, frees that salary month, deletes its uploaded bill files (unless another live invoice uses them) and moves its Drive copy to Drive's trash. Cancelled invoices are hidden from the list unless the Cancelled filter is picked.
+- The Expense Tracker's **Direct Expenses** tab lists categorised reimbursement rows (pending, approved, submitted, paid) in a date range, current month by default. They are listed only, not added to the tracker's totals or budgets.
 - The invoice list shows 8 per page, with one search box for invoice number, type or employee name.
 - After approval the admin sets **Submitted** → **Payment Completed** (dropdown on the invoice; still counts as approved).
 - **Google Drive copy:** on approval the invoice PDF (with bills) is saved to the Drive folder set in *Settings* (gear icon), through a small Google Apps Script the admin deploys once (code and steps are on that page). If the copy fails, approval still stands and the invoice shows the error with **Retry**.

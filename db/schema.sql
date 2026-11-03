@@ -102,4 +102,7 @@ alter table invoices alter column number drop not null;
 update invoices set items = (select jsonb_agg(case when it ? 'date' then it else it || jsonb_build_object('date', to_char(invoices.invoice_date, 'YYYY-MM-DD')) end)
                              from jsonb_array_elements(items) it)
   where kind = 'reimbursement' and exists (select 1 from jsonb_array_elements(items) it where not it ? 'date');
-create unique index if not exists one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected')
+create unique index if not exists one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected');
+
+-- Inactive logins cannot sign in or use the app.
+alter table users add column if not exists active boolean not null default true

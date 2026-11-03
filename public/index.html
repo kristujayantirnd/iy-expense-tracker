@@ -349,6 +349,36 @@
           </table>
         </div>
       </div>
+
+      <!-- Reimbursement claims tagged with a category (from Payouts) -->
+      <div class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row gap-3 justify-between sm:items-end">
+          <div>
+            <h3 class="text-sm font-bold text-slate-100">Reimbursement Claims</h3>
+            <p class="text-xs text-slate-400">Categorised reimbursement rows from Payouts entered in this date range: pending, approved, submitted and paid. Listed here only; they are not added to the totals or budgets above.</p>
+          </div>
+          <div class="flex gap-2 items-end">
+            <div><label for="rmbFrom" class="block text-[11px] text-slate-400 mb-1">From</label><input id="rmbFrom" type="date" onchange="loadReimbursements()" class="bg-slate-900 border border-slate-700 text-xs rounded-xl px-3 py-2 text-slate-200"></div>
+            <div><label for="rmbTo" class="block text-[11px] text-slate-400 mb-1">To</label><input id="rmbTo" type="date" onchange="loadReimbursements()" class="bg-slate-900 border border-slate-700 text-xs rounded-xl px-3 py-2 text-slate-200"></div>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400 bg-slate-900/50">
+                <th class="py-3 px-4 font-semibold">Date</th>
+                <th class="py-3 px-4 font-semibold">Employee</th>
+                <th class="py-3 px-4 font-semibold">Particulars</th>
+                <th class="py-3 px-4 font-semibold">Category</th>
+                <th class="py-3 px-4 font-semibold">Invoice</th>
+                <th class="py-3 px-4 font-semibold">Status</th>
+                <th class="py-3 px-4 font-semibold text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="rmbTableBody" class="divide-y divide-slate-800/60"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <!-- TAB 4: CATEGORIES & BUDGETS -->
@@ -658,6 +688,7 @@
 
     // INITIALIZATION
     window.onload = function() {
+      loadReimbursementsDefaults();
       renderAllViews();
       loadState();
     };
@@ -675,7 +706,7 @@
         body: body ? JSON.stringify(body) : undefined
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 401) { showLogin(); throw new Error('Please sign in'); }
+      if (res.status === 401) { showLogin(data.error); throw new Error('Please sign in'); }
       // Employees only have the payouts page.
       if (res.status === 403 && data.role === 'employee') { location.href = '/payouts.html'; throw new Error('Please sign in'); }
       if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
@@ -719,7 +750,8 @@
     }
 
     // SIGN IN / SIGN OUT
-    function showLogin() {
+    function showLogin(reason) {
+      document.getElementById('loginError').innerText = reason && reason !== 'Please sign in' ? reason : '';
       document.getElementById('loginOverlay').classList.remove('hidden');
       document.getElementById('loginEmail').focus();
     }
@@ -808,6 +840,53 @@
       if (tabId === 'dashboard') {
         setTimeout(() => renderCharts(), 50);
       }
+      if (tabId === 'expenses') loadReimbursements();
+    }
+
+    // REIMBURSEMENT CLAIMS (read-only, from Payouts)
+    function loadReimbursementsDefaults() {
+      const now = new Date();
+      const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      document.getElementById('rmbFrom').value = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      document.getElementById('rmbTo').value = ymd(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+    }
+
+    async function loadReimbursements() {
+      const from = document.getElementById('rmbFrom').value, to = document.getElementById('rmbTo').value;
+      const tbody = document.getElementById('rmbTableBody');
+      if (!from || !to) return;
+      let rows;
+      try {
+        rows = (await api('GET', `?view=reimbursements&from=${from}&to=${to}`)).rows;
+      } catch (e) {
+        if (e.message !== 'Please sign in') showToast(e.message, 'error');
+        return;
+      }
+      const statusOf = (r) => r.status === 'pending' ? ['Pending', 'text-amber-400 border-amber-500/30']
+        : r.paymentStatus === 'paid' ? ['Payment Completed', 'text-emerald-400 border-emerald-500/30']
+        : r.paymentStatus === 'submitted' ? ['Submitted', 'text-blue-400 border-blue-500/30'] : ['Approved', 'text-emerald-400 border-emerald-500/30'];
+      const day = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      // Reimbursements are always in rupees and keep their paise (the tracker's own format rounds).
+      const inr = (n) => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-slate-500 italic">No categorised reimbursement claims in this date range.</td></tr>`;
+        return;
+      }
+      const total = rows.reduce((s, r) => s + r.amount * 100, 0) / 100;
+      tbody.innerHTML = rows.map((r) => {
+        const cat = state.categories.find((c) => c.id === r.categoryId);
+        const [label, cls] = statusOf(r);
+        return `<tr class="hover:bg-slate-800/40 transition">
+          <td class="py-3 px-4 text-slate-300 whitespace-nowrap">${day(r.date)}</td>
+          <td class="py-3 px-4 text-slate-200">${esc(r.employee)}</td>
+          <td class="py-3 px-4 font-bold text-slate-100">${esc(r.particulars)}</td>
+          <td class="py-3 px-4"><span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-200 border border-slate-700">
+            <span class="w-2 h-2 rounded-full" style="background-color: ${cat ? cat.color : '#64748b'}"></span>${esc(cat ? cat.name : 'Unassigned')}</span></td>
+          <td class="py-3 px-4 font-mono text-slate-300 whitespace-nowrap">${r.number == null ? 'Not numbered yet' : 'RMB-' + String(r.number).padStart(4, '0')}</td>
+          <td class="py-3 px-4"><span class="px-2 py-0.5 rounded-full border text-[11px] font-semibold ${cls}">${label}</span></td>
+          <td class="py-3 px-4 text-right font-extrabold text-emerald-400 whitespace-nowrap">${inr(r.amount)}</td></tr>`;
+      }).join('') + `<tr class="font-bold"><td colspan="6" class="py-3 px-4 text-right text-slate-300">Total (${rows.length} row${rows.length === 1 ? '' : 's'})</td>
+          <td class="py-3 px-4 text-right font-extrabold text-slate-100 whitespace-nowrap">${inr(total)}</td></tr>`;
     }
 
     // CALCULATIONS UTILITY

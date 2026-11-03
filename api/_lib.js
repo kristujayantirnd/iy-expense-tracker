@@ -51,13 +51,21 @@ export function sessionCookie(value, maxAgeSec) {
 export const SESSION_MAX_AGE = SESSION_DAYS * 86400;
 
 // roles: allowed roles; omit to allow any signed-in user.
+export const INACTIVE = 'This login has been deactivated. Please contact the admin.';
+
 export async function requireUser(req, res, roles) {
   const userId = readSession(getCookie(req, 'sid'));
   const rows = userId
-    ? await sql()`select id, email, name, role, salary::float8 as salary, profile from users where id = ${userId}`
+    ? await sql()`select id, email, name, role, salary::float8 as salary, profile, active from users where id = ${userId}`
     : [];
   if (!rows.length) {
     res.status(401).json({ error: 'Please sign in' });
+    return null;
+  }
+  // Checked on every request, so deactivating someone locks them out straight away.
+  if (!rows[0].active) {
+    res.setHeader('Set-Cookie', sessionCookie('', 0));
+    res.status(401).json({ error: INACTIVE });
     return null;
   }
   if (roles && !roles.includes(rows[0].role)) {

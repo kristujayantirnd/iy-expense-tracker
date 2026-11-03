@@ -278,6 +278,8 @@
       </div>
       <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices and in the Expense Tracker (all roles)</label><input id="u-salary" type="number" min="0" step="0.01" class="inp"></div>
       <div><label class="lbl" for="u-password" id="u-passwordLabel">Password</label><input id="u-password" type="password" minlength="8" autocomplete="new-password" class="inp"></div>
+      <label class="flex items-start gap-2 text-sm text-slate-200"><input id="u-active" type="checkbox" class="mt-1" checked>
+        <span>Active<span class="block text-xs text-slate-400">Untick to block this person from signing in or using the app. Their invoices are kept.</span></span></label>
       <div class="flex justify-end gap-2">
         <button type="button" onclick="closeModal('userModal')" class="btn">Cancel</button>
         <button class="btn-primary">Save</button>
@@ -355,7 +357,7 @@
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = await res.json().catch(() => ({}));
-      if (res.status === 401) { showLogin(); throw new Error('Please sign in'); }
+      if (res.status === 401) { showLogin(data.error); throw new Error('Please sign in'); }
       if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
       return data;
     }
@@ -521,7 +523,7 @@
       const pickUser = state.me.role === 'admin' && editing.kind === 'salary';
       $('invUserBox').classList.toggle('hidden', !pickUser);
       if (pickUser) {
-        $('invUser').innerHTML = state.users.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}${u.id === state.me.id ? ' (me)' : ''}</option>`).join('');
+        $('invUser').innerHTML = state.users.filter((u) => u.active || u.id === editing.userId).map((u) => `<option value="${u.id}">${esc(u.name || u.email)}${u.id === state.me.id ? ' (me)' : ''}</option>`).join('');
         $('invUser').value = editing.userId;
         $('invUser').disabled = Boolean(inv);
       }
@@ -847,9 +849,10 @@ function doPost(e) {
 
     function renderUsers() {
       if (!state || state.me.role !== 'admin') return;
-      $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th"></th></tr>`
+      $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th">Status</th><th class="th"></th></tr>`
         + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td capitalize">${u.role}</td>
           <td class="td text-right">${rs(u.salary)}</td>
+          <td class="td"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${u.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-800 text-slate-400'}">${u.active ? 'Active' : 'Inactive'}</span></td>
           <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
     }
 
@@ -862,6 +865,8 @@ function doPost(e) {
       $('u-email').value = u ? u.email : '';
       $('u-email').disabled = Boolean(u);
       $('u-role').value = u ? u.role : 'employee';
+      $('u-active').checked = u ? u.active : true;
+      $('u-active').disabled = Boolean(u && u.id === state.me.id);
       $('u-salary').value = u ? u.salary : '';
       $('u-password').value = '';
       $('u-password').required = !u;
@@ -871,7 +876,7 @@ function doPost(e) {
 
     async function saveUser(e) {
       e.preventDefault();
-      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value };
+      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value, active: $('u-active').checked };
       if (await post({ action: 'user', user }, 'Login saved')) closeModal('userModal');
     }
 
@@ -887,7 +892,8 @@ function doPost(e) {
     }
 
     // SIGN IN / OUT
-    function showLogin() {
+    function showLogin(reason) {
+      $('loginError').innerText = reason && reason !== 'Please sign in' ? reason : '';
       $('loginOverlay').classList.remove('hidden');
       $('loginEmail').focus();
     }

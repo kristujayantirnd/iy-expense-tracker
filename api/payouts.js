@@ -68,7 +68,7 @@ async function readState(db, me) {
        order by i.invoice_date desc, i.id desc`,
     db`select id, name from categories order by name`,
     all
-      ? db`select id, email, role, salary::float8 as salary, coalesce(nullif(name, ''), profile->>'name', '') as name from users order by role, 5, email`
+      ? db`select id, email, role, salary::float8 as salary, coalesce(nullif(name, ''), profile->>'name', '') as name, active from users order by active desc, role, 5, email`
       : db`select 1 where false`,
   ]);
   const { signature, ...profile } = me.profile || {};
@@ -118,8 +118,9 @@ async function saveInvoice(db, me, body) {
     if (!admin || kind !== 'salary') throw new Bad('Only the admin can raise salary invoices for someone else');
     ownerId = intId(body.userId);
   }
-  const [owner] = await db`select id, email, salary::float8 as salary, profile from users where id = ${ownerId}`;
+  const [owner] = await db`select id, email, salary::float8 as salary, profile, active from users where id = ${ownerId}`;
   if (!owner) throw new Bad('Employee not found');
+  if (!owner.active) throw new Bad('That login is inactive');
   const self = owner.id === me.id;
   if (!owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
 
@@ -277,17 +278,19 @@ async function act(db, me, body) {
       const password = String(u.password || '');
       if (password && password.length < 8) throw new Bad('Password must be at least 8 characters');
       const name = text(u.name, 100, true);
+      const active = u.active !== false;
       if (u.id) {
         const id = intId(u.id);
         if (id === me.id && u.role !== 'admin') throw new Bad('You cannot remove your own admin access');
-        await db`update users set name = ${name}, role = ${u.role}, salary = ${salary} where id = ${id}`;
+        if (id === me.id && !active) throw new Bad('You cannot deactivate your own login');
+        await db`update users set name = ${name}, role = ${u.role}, salary = ${salary}, active = ${active} where id = ${id}`;
         if (password) await db`update users set password_hash = ${hashPassword(password)} where id = ${id}`;
         return;
       }
       const email = text(u.email, 200, true).toLowerCase();
       if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new Bad('Enter a valid email');
       if (!password) throw new Bad('Set a password for the new login');
-      const rows = await db`insert into users (email, name, password_hash, role, salary) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${salary})
+      const rows = await db`insert into users (email, name, password_hash, role, salary, active) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${salary}, ${active})
                             on conflict (email) do nothing returning id`;
       if (!rows.length) throw new Bad('A login with that email already exists');
       return;

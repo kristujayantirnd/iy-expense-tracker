@@ -37,6 +37,20 @@ async function readState(db) {
   return { currency, categories, employees, expenses };
 }
 
+// Categorised reimbursement rows entered between from and to (by row date), from invoices that are
+// pending or approved (incl. Submitted / Payment Completed). Rejected and cancelled are left out.
+async function reimbursementRows(db, from, to) {
+  const DAY = /^\d{4}-\d{2}-\d{2}$/;
+  if (!DAY.test(String(from)) || !DAY.test(String(to))) throw new Bad('Pick a valid date range');
+  return db`select i.id as "invoiceId", i.number, i.status, i.payment_status as "paymentStatus",
+                   coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as employee,
+                   it->>'date' as date, it->>'particulars' as particulars, (it->>'amount')::float8 as amount, it->>'categoryId' as "categoryId"
+            from invoices i join users u on u.id = i.user_id, jsonb_array_elements(i.items) it
+            where i.kind = 'reimbursement' and i.status in ('pending', 'approved')
+              and coalesce(it->>'categoryId', '') <> '' and it->>'date' between ${String(from)} and ${String(to)}
+            order by it->>'date', i.id`;
+}
+
 async function upsert(db, type, item) {
   if (type === 'currency') {
     if (!CURRENCIES.includes(item)) throw new Bad('Unknown currency');
@@ -100,6 +114,9 @@ export default async function handler(req, res) {
   if (!user) return;
   const db = sql();
   try {
+    if (req.method === 'GET' && req.query.view === 'reimbursements') {
+      return res.status(200).json({ rows: await reimbursementRows(db, req.query.from, req.query.to) });
+    }
     if (req.method === 'POST') await upsert(db, req.body?.type, req.body?.item);
     else if (req.method === 'DELETE') await remove(db, req.query.type, req.query.id);
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
