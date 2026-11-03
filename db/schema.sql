@@ -121,4 +121,11 @@ create table if not exists salary_revisions (
 -- Starting record for logins that have a salary but no history yet.
 insert into salary_revisions (user_id, old_salary, new_salary, effective_date, note)
   select id, null, salary, (created_at at time zone 'Asia/Kolkata')::date, 'Starting salary'
-  from users u where salary > 0 and not exists (select 1 from salary_revisions r where r.user_id = u.id)
+  from users u where salary > 0 and not exists (select 1 from salary_revisions r where r.user_id = u.id);
+
+-- Project Tracker owner linked to each login (single sign-on sends linked employees to their owner page).
+create table if not exists pt_owner_links (
+  owner_id text primary key,
+  owner_name text not null default '',
+  user_id int not null unique references users(id) on delete cascade
+)

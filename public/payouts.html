@@ -59,7 +59,7 @@
       </div>
       <div class="flex items-center gap-2">
         <a id="trackerLink" href="/" class="btn hidden"><i class="fa-solid fa-chart-pie"></i><span class="hidden sm:inline">Expense Tracker</span></a>
-        <a id="projectLink" href="https://simis-project-tracker.vercel.app/" target="_blank" rel="noopener" class="btn hidden" title="Project Tracker (opens in a new tab)" aria-label="Project Tracker, opens in a new tab"><i class="fa-solid fa-diagram-project"></i><span class="hidden sm:inline">Project Tracker</span></a>
+        <a id="projectLink" href="/api/project-tracker" target="_blank" rel="noopener" class="btn hidden" title="Project Tracker (opens in a new tab)" aria-label="Project Tracker, opens in a new tab"><i class="fa-solid fa-diagram-project"></i><span class="hidden sm:inline">Project Tracker</span></a>
         <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
         <button onclick="openPassword()" title="Change password" aria-label="Change password" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-key"></i>
@@ -223,6 +223,11 @@
         <p class="text-xs text-slate-400">Uploaded bill PDFs use Vercel Blob storage (free plan: 1 GB). Google Drive bills are not counted.</p>
         <p id="storageInfo" class="text-sm text-slate-200">…</p>
         <button id="clearBillsBtn" onclick="clearOldBills()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"><i class="fa-solid fa-trash"></i>Delete uploaded bills older than 3 months</button>
+      </div>
+      <div class="card p-4 space-y-3">
+        <h2 class="text-lg font-semibold text-slate-100">Project Tracker owners</h2>
+        <p class="text-xs text-slate-400">Link each Project Tracker owner to a login here. Linked people open the Project Tracker from the header button and see their own projects and stages. Admin and Management always get the full Project Tracker.</p>
+        <div class="overflow-x-auto"><table class="w-full" id="ptOwnersTable"></table></div>
       </div>
       <div class="card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-slate-100">Cancel an Approved Invoice</h2>
@@ -420,7 +425,7 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
-      $('projectLink').classList.toggle('hidden', data.me.role === 'employee');
+      $('projectLink').classList.toggle('hidden', data.me.role === 'employee' && !data.me.ptLinked); // employees once linked to an owner
       $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
@@ -461,7 +466,7 @@
       $('settingsBtn').classList.toggle('!text-blue-700', tab === 'employer');
       $('settingsBtn').classList.toggle('bg-blue-50', tab === 'employer');
       if (tab === 'register') loadRegister();
-      if (tab === 'employer') loadStorage();
+      if (tab === 'employer') { loadStorage(); loadPtOwners(); }
     }
 
     // INVOICES
@@ -771,6 +776,34 @@
         <button type="button" class="btn" onclick="linkBill(${n})" title="Google Drive link" aria-label="Google Drive link, row ${n + 1}"><i class="fa-brands fa-google-drive"></i>Drive</button></div>`;
     }
 
+    // PROJECT TRACKER OWNER LINKS (Settings)
+    async function ptApi(method, body) {
+      const res = await fetch('/api/project-tracker?view=links', { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not reach the Project Tracker');
+      return data;
+    }
+
+    function renderPtOwners(owners) {
+      const opts = (sel) => '<option value="">— Not linked —</option>' + state.users.map((u) => `<option value="${u.id}" ${u.id === sel ? 'selected' : ''}>${esc(u.name || u.email)}${u.active ? '' : ' (inactive)'}</option>`).join('');
+      $('ptOwnersTable').innerHTML = `<tr><th class="th">Project Tracker owner</th><th class="th">Owner email</th><th class="th">Login here</th></tr>`
+        + (owners.map((o) => `<tr><td class="td">${esc(o.name)}</td><td class="td text-xs text-slate-400">${esc(o.email || '')}</td>
+            <td class="td"><select class="inp !py-1.5" aria-label="Login for ${esc(o.name)}" onchange="linkPtOwner('${esc(o.id)}', this.value)">${opts(o.userId)}</select></td></tr>`).join('')
+          || `<tr><td class="td text-slate-400" colspan="3">No owners in the Project Tracker yet.</td></tr>`);
+    }
+
+    async function loadPtOwners() {
+      try { renderPtOwners((await ptApi('GET')).owners); }
+      catch (e) { $('ptOwnersTable').innerHTML = `<tr><td class="td text-red-700">${esc(e.message)}</td></tr>`; }
+    }
+
+    async function linkPtOwner(ownerId, userId) {
+      try {
+        renderPtOwners((await ptApi('POST', { ownerId, userId: userId || null })).owners);
+        toast(userId ? 'Owner linked' : 'Owner unlinked', 'success');
+      } catch (e) { toast(e.message, 'error'); loadPtOwners(); }
+    }
+
     async function loadStorage() {
       try {
         const u = await billApi('GET', '?usage=1');
@@ -1030,6 +1063,8 @@ function doPost(e) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { $('loginError').innerText = data.error || 'Sign in failed'; return; }
+        // Came from the Project Tracker's "Sign in with Invincible YOU": go back there.
+        if (new URLSearchParams(location.search).get('next') === 'project-tracker') { location.href = '/api/project-tracker'; return; }
         if (data.role === 'management') { location.href = '/'; return; } // Management's home is the Expense Tracker
       } catch {
         $('loginError').innerText = 'Could not reach the server';

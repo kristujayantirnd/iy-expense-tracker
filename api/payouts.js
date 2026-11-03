@@ -87,8 +87,9 @@ async function readState(db, me) {
        order by r.user_id, r.effective_date, r.id`,
   ]);
   const { signature, ...profile } = me.profile || {};
+  const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${me.id}`;
   return {
-    me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature) },
+    me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature), ptLinked: Boolean(ptLink) },
     employer: await getEmployer(db),
     invoices,
     categories,
