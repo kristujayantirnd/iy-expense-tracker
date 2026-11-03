@@ -161,6 +161,12 @@
         </form>
       </div>
       <div class="card p-4 space-y-2">
+        <h2 class="text-lg font-semibold text-slate-100">Bill Storage</h2>
+        <p class="text-xs text-slate-400">Uploaded bill PDFs use Vercel Blob storage (free plan: 1 GB). Google Drive bills are not counted.</p>
+        <p id="storageInfo" class="text-sm text-slate-200">…</p>
+        <button id="clearBillsBtn" onclick="clearOldBills()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"><i class="fa-solid fa-trash"></i>Delete uploaded bills older than 3 months</button>
+      </div>
+      <div class="card p-4 space-y-2">
         <h2 class="text-lg font-semibold text-slate-100">Google Sheet</h2>
         <p class="text-xs text-slate-400">Paste this formula into cell A1 of a sheet. It lists every month's payout register and Google refreshes it about every hour. Add <code>&amp;month=2026-11</code> inside the link for one month only. Anyone with this link can read the payouts, so share the sheet carefully.</p>
         <div class="flex gap-2">
@@ -173,7 +179,7 @@
 
   <!-- INVOICE MODAL -->
   <div id="invoiceModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
-    <form onsubmit="saveInvoice(event)" class="card w-full max-w-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+    <form onsubmit="saveInvoice(event)" class="card w-full max-w-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between">
         <h3 id="invoiceTitle" class="text-lg font-semibold text-slate-100"></h3>
         <button type="button" onclick="closeModal('invoiceModal')" aria-label="Close" class="p-1 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
@@ -347,6 +353,7 @@
       document.querySelectorAll('.tab-panel').forEach((el) => el.classList.toggle('hidden', el.id !== 'tab-' + tab));
       document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
       if (tab === 'register') loadRegister();
+      if (tab === 'employer') loadStorage();
     }
 
     // INVOICES
@@ -362,7 +369,7 @@
       const list = state.invoices.filter((i) => !filter || i.status === filter);
       const head = `<tr><th class="th">No.</th><th class="th">Type</th>${role !== 'employee' ? '<th class="th">Employee</th>' : ''}<th class="th">Date</th><th class="th text-right">Amount</th><th class="th">Status</th><th class="th"></th></tr>`;
       const rows = list.map((i) => {
-        const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Print or save as PDF"><i class="fa-solid fa-print"></i>Print</button>`];
+        const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Invoice with attached bills as one PDF"><i class="fa-solid fa-file-pdf"></i>PDF</button>`];
         if (i.userId === state.me.id && i.status !== 'approved') actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
         if (role === 'admin' && i.status === 'pending') {
           actions.push(`<button class="btn !text-emerald-700" onclick="approve(${i.id})"><i class="fa-solid fa-check"></i>Approve</button>`);
@@ -405,12 +412,13 @@
         return;
       }
       const total = sumItems(lineItems);
-      box.innerHTML = `<table class="w-full"><tr><th class="th w-8">#</th><th class="th">Reimbursement particulars</th><th class="th w-40">Amount (Rs.)</th><th class="th w-8"></th></tr>
+      box.innerHTML = `<div class="overflow-x-auto"><table class="w-full"><tr><th class="th w-8">#</th><th class="th">Reimbursement particulars</th><th class="th w-36">Amount (Rs.)</th><th class="th">Bill (PDF)</th><th class="th w-8"></th></tr>
         ${lineItems.map((it, n) => `<tr><td class="td text-slate-400">${n + 1}</td>
           <td class="td"><input class="inp" required maxlength="300" aria-label="Particulars, row ${n + 1}" value="${esc(it.particulars)}" oninput="lineItems[${n}].particulars=this.value"></td>
           <td class="td"><input class="inp text-right" required type="number" min="0.01" step="0.01" aria-label="Amount, row ${n + 1}" value="${esc(it.amount)}" oninput="lineItems[${n}].amount=this.value; updateTotals()"></td>
+          <td class="td">${billCell(it, n)}</td>
           <td class="td">${lineItems.length > 1 ? `<button type="button" onclick="removeRow(${n})" aria-label="Remove row ${n + 1}" class="text-slate-400 hover:text-red-700"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`).join('')}
-        </table>
+        </table></div>
         <button type="button" onclick="addRow()" class="btn mt-2"><i class="fa-solid fa-plus"></i>Add row</button>
         <div class="mt-3 ml-auto max-w-xs text-sm space-y-1">
           <div class="flex justify-between"><span class="text-slate-400">Subtotal</span><span id="invSubtotal">${rs(total)}</span></div>
@@ -429,7 +437,10 @@
     async function saveInvoice(e) {
       e.preventDefault();
       const body = { action: 'invoice', id: editing.id, kind: editing.kind, date: $('invDate').value };
-      if (editing.kind === 'reimbursement') body.items = lineItems.map((it) => ({ particulars: it.particulars, amount: Number(it.amount) }));
+      if (editing.kind === 'reimbursement') {
+        if (lineItems.some((it) => !it.bill || it.bill.busy)) return toast('Attach a bill (PDF upload or Drive link) to every row', 'error');
+        body.items = lineItems.map((it) => ({ particulars: it.particulars, amount: Number(it.amount), bill: it.bill }));
+      }
       if (await post(body, 'Invoice submitted for approval')) closeModal('invoiceModal');
     }
 
@@ -445,43 +456,83 @@
       if (await post({ action: 'decide', id: rejectId, status: 'rejected', note: $('rejectNote').value }, 'Invoice sent back to the employee')) closeModal('rejectModal');
     }
 
-    // PRINT / PDF (the browser's print dialog has "Save as PDF")
-    function line(label, v) { return v ? `<div><b>${label}:</b> ${esc(v)}</div>` : ''; }
+    // Invoice + attached bills as one PDF, built on the server; opens in a new tab to print or save.
+    function printInvoice(id) {
+      window.open(`/api/invoice-pdf?id=${id}`, '_blank');
+    }
 
-    async function printInvoice(id) {
-      let inv;
-      try { inv = await api('GET', `?invoice=${id}`); } catch (e) { return toast(e.message, 'error'); }
-      const emp = inv.employee || {}, er = inv.employer || {};
-      $('printArea').innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
-          <div><div style="font-size:22px;font-weight:700">${kindLabel(inv.kind).toUpperCase()} INVOICE</div>
-            ${inv.status !== 'approved' ? `<div style="color:#b45309;font-weight:600">${inv.status.toUpperCase()} – NOT YET APPROVED</div>` : ''}</div>
-          <div style="text-align:right;font-size:13px"><div><b>Invoice No:</b> ${invNo(inv)}</div><div><b>Date:</b> ${showDate(inv.date)}</div></div>
-        </div>
-        <table style="margin-bottom:14px"><tr>
-          <td style="width:50%"><div style="font-weight:700;margin-bottom:4px">From</div>
-            <div style="font-weight:600">${esc(emp.name)}</div><div style="white-space:pre-line">${esc(emp.address)}</div>
-            ${line('Contact', emp.phone)}${line('Email', emp.email)}${line('PAN', emp.pan)}</td>
-          <td><div style="font-weight:700;margin-bottom:4px">Bill To</div>
-            <div style="font-weight:600">${esc(er.companyName)}</div>${line('GSTIN', er.gstin)}${line('PAN', er.pan)}</td>
-        </tr></table>
-        <table style="margin-bottom:14px">
-          <tr><th style="width:30px">#</th><th>Particulars</th><th class="num" style="width:140px">Amount (Rs.)</th></tr>
-          ${inv.items.map((it, n) => `<tr><td>${n + 1}</td><td>${esc(it.particulars)}</td><td class="num">${rs(it.amount).slice(4)}</td></tr>`).join('')}
-          <tr><td></td><td class="num"><b>Subtotal</b></td><td class="num">${rs(inv.total).slice(4)}</td></tr>
-          <tr><td></td><td class="num"><b>Grand Total</b></td><td class="num"><b>${rs(inv.total)}</b></td></tr>
-        </table>
-        <table style="margin-bottom:24px"><tr>
-          <td style="width:50%"><div style="font-weight:700;margin-bottom:4px">Pay to (employee bank)</div>
-            ${line('Account No', emp.accountNumber)}${line('Bank', emp.bank)}${line('Branch', emp.branch)}${line('IFSC', emp.ifsc)}</td>
-          <td><div style="font-weight:700;margin-bottom:4px">Employer bank</div>
-            ${line('Account No', er.accountNumber)}${line('Bank', er.bank)}${line('IFSC', er.ifsc)}${line('MICR', er.micr)}${line('Address', er.bankAddress)}</td>
-        </tr></table>
-        <div style="text-align:right">
-          ${emp.signature ? `<img src="${esc(emp.signature)}" alt="Signature" style="max-height:60px;display:inline-block">` : '<div style="height:60px"></div>'}
-          <div style="border-top:1px solid #000;display:inline-block;padding-top:4px;min-width:200px">${esc(emp.name)}</div>
-        </div>`;
-      window.print();
+    // BILLS (one per reimbursement row: PDF upload or Google Drive link)
+    async function billApi(method, query, body) {
+      const res = await fetch('/api/bills' + query, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Something went wrong, please try again');
+      return data;
+    }
+
+    function uploadBill(n, input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.type !== 'application/pdf') return toast('Choose a PDF file', 'error');
+      if (file.size > 2 * 1024 * 1024) return toast('The PDF must be 2 MB or smaller. Scan at a lower resolution or compress it.', 'error');
+      const reader = new FileReader();
+      reader.onload = async () => {
+        lineItems[n].bill = { busy: true, name: file.name };
+        renderInvoiceItems();
+        try {
+          const { id } = await billApi('POST', '', { data: reader.result.split(',')[1] });
+          lineItems[n].bill = { upload: id, name: file.name };
+        } catch (e) {
+          lineItems[n].bill = null;
+          toast(e.message, 'error');
+        }
+        renderInvoiceItems();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function linkBill(n) {
+      const url = window.prompt("Paste the Google Drive link to the bill PDF.\nThe file must be shared as 'Anyone with the link can view'.");
+      if (!url) return;
+      lineItems[n].bill = { busy: true, name: 'Checking link…' };
+      renderInvoiceItems();
+      try {
+        const { fileId } = await billApi('POST', '', { driveUrl: url });
+        lineItems[n].bill = { drive: fileId, name: 'Google Drive file' };
+      } catch (e) {
+        lineItems[n].bill = null;
+        toast(e.message, 'error');
+      }
+      renderInvoiceItems();
+    }
+
+    function billCell(it, n) {
+      const b = it.bill;
+      if (b && b.busy) return `<span class="text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ${esc(b.name)}</span>`;
+      if (b && (b.upload || b.drive)) {
+        const href = b.upload ? `/api/bills?id=${b.upload}` : `https://drive.google.com/file/d/${encodeURIComponent(b.drive)}/view`;
+        return `<div class="flex items-center gap-2 text-xs"><a href="${href}" target="_blank" rel="noopener" class="text-emerald-700 underline truncate max-w-[9rem]" title="${esc(b.name)}"><i class="fa-solid fa-${b.upload ? 'file-pdf' : 'brands fa-google-drive'}"></i> ${esc(b.name)}</a>
+          <button type="button" onclick="lineItems[${n}].bill=null; renderInvoiceItems()" aria-label="Remove bill, row ${n + 1}" class="text-slate-400 hover:text-red-700"><i class="fa-solid fa-xmark"></i></button></div>`;
+      }
+      return `<div class="flex gap-1">
+        <label class="btn cursor-pointer" title="Upload PDF (max 2 MB)"><i class="fa-solid fa-upload"></i>PDF<input type="file" accept="application/pdf" class="sr-only" aria-label="Upload bill PDF, row ${n + 1}" onchange="uploadBill(${n}, this)"></label>
+        <button type="button" class="btn" onclick="linkBill(${n})" title="Google Drive link" aria-label="Google Drive link, row ${n + 1}"><i class="fa-brands fa-google-drive"></i>Drive</button></div>`;
+    }
+
+    async function loadStorage() {
+      try {
+        const u = await billApi('GET', '?usage=1');
+        $('storageInfo').innerText = `${(u.bytes / 1048576).toFixed(1)} MB of 1,024 MB used by ${u.files} uploaded bill(s). ${u.old} are older than ${u.months} months.`;
+        $('clearBillsBtn').disabled = !u.old;
+      } catch (e) { $('storageInfo').innerText = e.message; }
+    }
+
+    async function clearOldBills() {
+      if (!window.confirm('Delete uploaded bill PDFs older than 3 months from storage? Invoices keep their details, but their PDFs will show the bill as deleted. Download any PDFs you need first. This cannot be undone.')) return;
+      try {
+        const { deleted } = await billApi('DELETE', '');
+        toast(`${deleted} old bill(s) deleted`, 'success');
+      } catch (e) { toast(e.message, 'error'); }
+      loadStorage();
     }
 
     // PAYOUT REGISTER

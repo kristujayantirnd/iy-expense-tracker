@@ -8,6 +8,8 @@
     "test": "node scripts/selfcheck.js"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.0.0"
+    "@neondatabase/serverless": "^1.0.0",
+    "@vercel/blob": "^2.8.2",
+    "pdf-lib": "^1.17.1"
   }
 }

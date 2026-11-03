@@ -1,4 +1,5 @@
 import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken } from './_lib.js';
+import { driveFileId } from './_bills.js';
 
 const ROLES = ['admin', 'employee', 'management'];
 const EMPLOYER_FIELDS = ['companyName', 'accountNumber', 'bank', 'ifsc', 'micr', 'bankAddress', 'gstin', 'pan'];
@@ -29,6 +30,19 @@ const date = (v) => {
   if (!DATE.test(s) || Number.isNaN(Date.parse(s))) throw new Bad('Pick a valid date');
   return s;
 };
+// Each reimbursement row needs a bill: { upload: <bill id>, name } or { drive: <file id>, name }.
+const billRef = (b) => {
+  const name = text(b?.name, 200);
+  if (b?.upload) return { upload: intId(b.upload), name };
+  if (b?.drive) {
+    try {
+      return { drive: driveFileId(b.drive), name };
+    } catch (e) {
+      throw new Bad(e.message);
+    }
+  }
+  throw new Bad('Attach a bill (PDF upload or Google Drive link) to every row');
+};
 const pick = (obj, fields, max) => Object.fromEntries(fields.map((f) => [f, text(obj?.[f], max)]));
 
 const getEmployer = async (db) => {
@@ -36,7 +50,7 @@ const getEmployer = async (db) => {
   return rows.length ? JSON.parse(rows[0].value) : {};
 };
 
-// List queries leave out signatures (large); a single invoice includes them for printing.
+// List queries leave out signatures (large); the invoice PDF reads the full copy.
 async function readState(db, me) {
   const all = me.role !== 'employee';
   const [invoices, users] = await db.transaction([
@@ -79,7 +93,11 @@ async function saveInvoice(db, me, body) {
   } else if (kind === 'reimbursement') {
     if (!Array.isArray(body.items) || !body.items.length) throw new Bad('Add at least one line item');
     if (body.items.length > 50) throw new Bad('Too many line items');
-    items = body.items.map((it) => ({ particulars: text(it?.particulars, 300, true), amount: money(it?.amount) }));
+    items = body.items.map((it) => ({ particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
+    // Uploaded bills must be the employee's own and still in storage.
+    const ids = items.filter((it) => it.bill.upload).map((it) => it.bill.upload);
+    const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${me.id} and deleted_at is null` : [];
+    if (found.length !== new Set(ids).size) throw new Bad('A bill upload was not found, please attach it again');
   } else throw new Bad('Unknown invoice type');
 
   const total = Math.round(items.reduce((s, it) => s + it.amount * 100, 0)) / 100;
@@ -171,13 +189,6 @@ export default async function handler(req, res) {
   if (!me) return;
   const db = sql();
   try {
-    if (req.method === 'GET' && req.query.invoice) {
-      const [inv] = await db`select id, user_id as "userId", kind, number, to_char(invoice_date, 'YYYY-MM-DD') as date, items,
-                                    total::float8 as total, status, note, employer, employee
-                             from invoices where id = ${intId(req.query.invoice)} and (${me.role !== 'employee'} or user_id = ${me.id})`;
-      if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-      return res.status(200).json(inv);
-    }
     if (req.method === 'GET' && req.query.view === 'register') {
       if (me.role === 'employee') return res.status(403).json({ error: 'You do not have access to this' });
       const from = date(req.query.from);

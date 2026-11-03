@@ -68,4 +68,14 @@ create table if not exists invoices (
 );
 
 create unique index if not exists one_salary_invoice_per_month
-  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary'
+  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary';
+
+-- Scanned bills uploaded for reimbursement rows (files live in Vercel Blob). deleted_at = cleared from storage.
+create table if not exists bills (
+  id serial primary key,
+  user_id int not null references users(id),
+  pathname text not null,
+  size int not null,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+)
