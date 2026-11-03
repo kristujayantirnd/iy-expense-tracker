@@ -63,6 +63,9 @@
         <button onclick="openPassword()" title="Change password" aria-label="Change password" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-key"></i>
         </button>
+        <button id="settingsBtn" onclick="showTab('employer')" title="Settings" aria-label="Settings" class="hidden p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
+          <i class="fa-solid fa-gear"></i>
+        </button>
         <button onclick="logout()" title="Sign out" aria-label="Sign out" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-right-from-bracket"></i>
         </button>
@@ -85,6 +88,7 @@
             <option value="submitted">Submitted</option>
             <option value="paid">Payment Completed</option>
             <option value="rejected">Rejected</option>
+            <option value="cancelled">Cancelled</option>
           </select>
           <button onclick="openInvoice('salary')" class="btn-primary"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
           <button onclick="openInvoice('reimbursement')" class="btn-primary"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
@@ -147,6 +151,7 @@
 
     <!-- EMPLOYER (admin) -->
     <section id="tab-employer" class="tab-panel space-y-4 hidden">
+      <h2 class="text-xl font-semibold text-slate-100"><i class="fa-solid fa-gear text-slate-400"></i> Settings</h2>
       <div class="card p-4">
         <h2 class="text-lg font-semibold text-slate-100 mb-1">Employer Details</h2>
         <p class="text-xs text-slate-400 mb-4">Printed on every invoice as the billed party.</p>
@@ -190,6 +195,15 @@
         <p id="storageInfo" class="text-sm text-slate-200">…</p>
         <button id="clearBillsBtn" onclick="clearOldBills()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"><i class="fa-solid fa-trash"></i>Delete uploaded bills older than 3 months</button>
       </div>
+      <div class="card p-4 space-y-3">
+        <h2 class="text-lg font-semibold text-slate-100">Cancel an Approved Invoice</h2>
+        <p class="text-xs text-slate-400">For worst cases only. A cancelled invoice is removed from the payout register and can't be edited or approved again. Its number is not reused, and any copy already in Google Drive stays there. A cancelled salary month can be invoiced again.</p>
+        <form onsubmit="cancelInvoice(event)" class="grid gap-3">
+          <div><label class="lbl" for="cancelPick">Approved invoice</label><select id="cancelPick" required class="inp"></select></div>
+          <div><label class="lbl" for="cancelReason">Reason (shown on the invoice)</label><textarea id="cancelReason" required rows="2" maxlength="480" class="inp"></textarea></div>
+          <div><button class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white inline-flex items-center gap-1.5"><i class="fa-solid fa-ban"></i>Cancel invoice</button></div>
+        </form>
+      </div>
       <div class="card p-4 space-y-2">
         <h2 class="text-lg font-semibold text-slate-100">Google Sheet</h2>
         <p class="text-xs text-slate-400">Paste this formula into cell A1 of a sheet. It lists every month's payout register and Google refreshes it about every hour. Add <code>&amp;month=2026-11</code> inside the link for one month only. Anyone with this link can read the payouts, so share the sheet carefully.</p>
@@ -211,6 +225,8 @@
       <div class="grid sm:grid-cols-2 gap-3">
         <div><label class="lbl">Invoice number</label><input id="invNumber" class="inp" disabled></div>
         <div><label class="lbl" for="invDate">Invoice date</label><input id="invDate" type="date" required class="inp" oninput="renderInvoiceItems()"></div>
+        <div id="invUserBox" class="hidden"><label class="lbl" for="invUser">Employee</label><select id="invUser" class="inp" onchange="editing.userId = Number(this.value); renderInvoiceItems()"></select></div>
+        <div id="invCategoryBox" class="hidden"><label class="lbl" for="invCategory">Expense category (optional)</label><select id="invCategory" class="inp"></select></div>
       </div>
       <div id="invItems"></div>
       <div class="flex justify-end gap-2">
@@ -218,6 +234,23 @@
         <button class="btn-primary"><i class="fa-solid fa-paper-plane"></i>Submit for approval</button>
       </div>
     </form>
+  </div>
+
+  <!-- REVIEW MODAL (admin) -->
+  <div id="reviewModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
+    <div class="card w-full max-w-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <div><h3 id="reviewTitle" class="text-lg font-semibold text-slate-100"></h3><p id="reviewMeta" class="text-xs text-slate-400"></p></div>
+        <button type="button" onclick="closeModal('reviewModal')" aria-label="Close" class="p-1 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div id="reviewItems" class="overflow-x-auto"></div>
+      <div id="reviewCategoryBox" class="max-w-sm"><label class="lbl" for="reviewCategory">Expense category</label><select id="reviewCategory" class="inp"></select></div>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" onclick="printInvoice(reviewId)" class="btn"><i class="fa-solid fa-file-pdf"></i>Full PDF</button>
+        <button type="button" onclick="rejectReviewed()" class="btn !text-red-700"><i class="fa-solid fa-xmark"></i>Reject</button>
+        <button type="button" onclick="approveReviewed()" class="btn-primary"><i class="fa-solid fa-check"></i>Approve</button>
+      </div>
+    </div>
   </div>
 
   <!-- REJECT MODAL -->
@@ -291,7 +324,7 @@
     let registerRows = [];
 
     const TABS = {
-      admin: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['users', 'Logins & Salaries'], ['employer', 'Employer & Sheet']],
+      admin: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register'], ['users', 'Logins & Salaries']],
       management: [['invoices', 'Invoices'], ['profile', 'My Profile'], ['register', 'Payout Register']],
       employee: [['invoices', 'My Invoices'], ['profile', 'My Profile']],
     };
@@ -348,11 +381,14 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
+      $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
       renderInvoices();
       renderUsers();
-      showTab(firstLoad || !TABS[data.me.role].some(([k]) => k === currentTab) ? TABS[data.me.role][0][0] : currentTab);
+      renderCancelList();
+      const allowed = TABS[data.me.role].map(([k]) => k).concat(data.me.role === 'admin' ? ['employer'] : []);
+      showTab(firstLoad || !allowed.includes(currentTab) ? allowed[0] : currentTab);
     }
 
     function fillForms() {
@@ -381,6 +417,8 @@
       currentTab = tab;
       document.querySelectorAll('.tab-panel').forEach((el) => el.classList.toggle('hidden', el.id !== 'tab-' + tab));
       document.querySelectorAll('.tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
+      $('settingsBtn').classList.toggle('!text-blue-700', tab === 'employer');
+      $('settingsBtn').classList.toggle('bg-blue-50', tab === 'employer');
       if (tab === 'register') loadRegister();
       if (tab === 'employer') loadStorage();
     }
@@ -390,7 +428,7 @@
     function statusBadge(i) {
       const key = i.status === 'approved' ? i.paymentStatus || 'approved' : i.status;
       const cls = { pending: 'bg-amber-50 text-amber-700', approved: 'bg-emerald-50 text-emerald-700', rejected: 'bg-red-50 text-red-700',
-        submitted: 'bg-blue-50 text-blue-700', paid: 'bg-emerald-100 text-emerald-800' }[key];
+        submitted: 'bg-blue-50 text-blue-700', paid: 'bg-emerald-100 text-emerald-800', cancelled: 'bg-slate-800 text-slate-400 line-through' }[key];
       const label = i.status === 'approved' ? PAYMENT[i.paymentStatus || ''] : i.status[0].toUpperCase() + i.status.slice(1);
       return `<span class="px-2 py-0.5 rounded-full text-xs font-semibold ${cls}">${label}</span>`;
     }
@@ -424,17 +462,18 @@
       const head = `<tr><th class="th">No.</th><th class="th">Type</th>${role !== 'employee' ? '<th class="th">Employee</th>' : ''}<th class="th">Date</th><th class="th text-right">Amount</th><th class="th">Status</th><th class="th"></th></tr>`;
       const rows = list.map((i) => {
         const actions = [`<button class="btn" onclick="printInvoice(${i.id})" title="Invoice with attached bills as one PDF"><i class="fa-solid fa-file-pdf"></i>PDF</button>`];
-        if (i.userId === state.me.id && i.status !== 'approved') actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
+        const canEdit = i.userId === state.me.id || (role === 'admin' && i.kind === 'salary');
+        if (canEdit && !['approved', 'cancelled'].includes(i.status)) actions.push(`<button class="btn" onclick="editInvoice(${i.id})"><i class="fa-solid fa-pen"></i>Edit</button>`);
         if (role === 'admin' && i.status === 'pending') {
-          actions.push(`<button class="btn !text-emerald-700" onclick="approve(${i.id})"><i class="fa-solid fa-check"></i>Approve</button>`);
-          actions.push(`<button class="btn !text-red-700" onclick="reject(${i.id})"><i class="fa-solid fa-xmark"></i>Reject</button>`);
+          actions.push(`<button class="btn !text-emerald-700" onclick="openReview(${i.id})"><i class="fa-solid fa-magnifying-glass"></i>Review</button>`);
         }
         if (role === 'admin' && i.status === 'approved') {
           actions.push(`<select class="inp !w-auto !py-1.5 text-xs" aria-label="Payment status for ${invNo(i)}" onchange="setPayment(${i.id}, this.value)">
             ${Object.entries(PAYMENT).map(([k, label]) => `<option value="${k}" ${k === (i.paymentStatus || '') ? 'selected' : ''}>${label}</option>`).join('')}</select>`);
         }
-        const note = i.status === 'rejected' && i.note ? `<div class="text-xs text-red-700 mt-1 whitespace-normal">${esc(i.note)}</div>` : '';
-        return `<tr><td class="td font-mono">${invNo(i)}</td><td class="td">${kindLabel(i.kind)}</td>
+        const note = ['rejected', 'cancelled'].includes(i.status) && i.note ? `<div class="text-xs text-red-700 mt-1 whitespace-normal">${esc(i.note)}</div>` : '';
+        const cat = i.categoryId && (state.categories.find((c) => c.id === i.categoryId) || {}).name;
+        return `<tr><td class="td font-mono">${invNo(i)}</td><td class="td">${kindLabel(i.kind)}${cat ? `<div class="text-xs text-slate-400">${esc(cat)}</div>` : ''}</td>
           ${role !== 'employee' ? `<td class="td">${esc(i.name)}</td>` : ''}
           <td class="td">${showDate(i.date)}</td><td class="td text-right">${rs(i.total)}</td>
           <td class="td">${statusBadge(i)}${note}${driveCell(i)}</td><td class="td"><div class="flex gap-1 justify-end">${actions.join('')}</div></td></tr>`;
@@ -443,7 +482,17 @@
     }
 
     function openInvoice(kind, inv) {
-      editing = inv ? { id: inv.id, kind: inv.kind, number: invNo(inv) } : { kind, number: 'Assigned when submitted' };
+      editing = inv ? { id: inv.id, kind: inv.kind, number: invNo(inv), userId: inv.userId } : { kind, number: 'Assigned when submitted', userId: state.me.id };
+      // Admin can raise (and edit) salary invoices for anyone.
+      const pickUser = state.me.role === 'admin' && editing.kind === 'salary';
+      $('invUserBox').classList.toggle('hidden', !pickUser);
+      if (pickUser) {
+        $('invUser').innerHTML = state.users.map((u) => `<option value="${u.id}">${esc(u.name || u.email)}${u.id === state.me.id ? ' (me)' : ''}</option>`).join('');
+        $('invUser').value = editing.userId;
+        $('invUser').disabled = Boolean(inv);
+      }
+      $('invCategoryBox').classList.toggle('hidden', editing.kind !== 'reimbursement');
+      $('invCategory').innerHTML = categoryOptions(inv ? inv.categoryId : '');
       $('invoiceTitle').innerText = (inv ? 'Edit ' : 'New ') + kindLabel(editing.kind) + ' Invoice';
       $('invNumber').value = editing.number;
       $('invDate').value = inv ? inv.date : ymd(new Date());
@@ -461,12 +510,14 @@
       if (editing.kind === 'salary') {
         const d = $('invDate').value;
         const period = d ? `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` : '—';
-        box.innerHTML = state.me.salary > 0
+        const self = editing.userId === state.me.id;
+        const salary = self ? state.me.salary : (state.users.find((u) => u.id === editing.userId) || {}).salary;
+        box.innerHTML = salary > 0
           ? `<table class="w-full"><tr><th class="th">Particulars</th><th class="th text-right">Amount</th></tr>
-             <tr><td class="td">Salary for ${period}</td><td class="td text-right">${rs(state.me.salary)}</td></tr>
-             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(state.me.salary)}</td></tr></table>
+             <tr><td class="td">Salary for ${period}</td><td class="td text-right">${rs(salary)}</td></tr>
+             <tr><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(salary)}</td></tr></table>
              <p class="text-xs text-slate-400 mt-2">Salary amount is set by the admin. 10% TDS is deducted in the payout.</p>`
-          : `<p class="text-sm text-red-700">Your salary has not been set by the admin yet.</p>`;
+          : `<p class="text-sm text-red-700">${self ? 'Your salary has not been set by the admin yet.' : "This employee's salary is not set yet (Logins & Salaries)."}</p>`;
         return;
       }
       const total = sumItems(lineItems);
@@ -494,25 +545,71 @@
 
     async function saveInvoice(e) {
       e.preventDefault();
-      const body = { action: 'invoice', id: editing.id, kind: editing.kind, date: $('invDate').value };
+      const body = { action: 'invoice', id: editing.id, kind: editing.kind, date: $('invDate').value, userId: editing.userId };
       if (editing.kind === 'reimbursement') {
+        body.categoryId = $('invCategory').value;
         if (lineItems.some((it) => !it.bill || it.bill.busy)) return toast('Attach a bill (PDF upload or Drive link) to every row', 'error');
         body.items = lineItems.map((it) => ({ particulars: it.particulars, amount: Number(it.amount), bill: it.bill }));
       }
       if (await post(body, 'Invoice submitted for approval')) closeModal('invoiceModal');
     }
 
-    function approve(id) {
-      const inv = state.invoices.find((i) => i.id === id);
-      if (window.confirm(`Approve ${invNo(inv)} for ${inv.name} (${rs(inv.total)})? It can't be edited after this.`)) {
-        toast('Approving and copying the PDF to Google Drive…');
-        post({ action: 'decide', id, status: 'approved' }).then((ok) => {
-          if (!ok) return;
-          const done = state.invoices.find((x) => x.id === id);
-          toast(done.driveUrl ? 'Invoice approved and saved to Google Drive' : 'Invoice approved, but the Drive copy failed (see the invoice)', done.driveUrl ? 'success' : 'error');
-        });
-      }
+    function categoryOptions(selected) {
+      return `<option value="">— None —</option>` + state.categories.map((c) => `<option value="${esc(c.id)}" ${c.id === selected ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
     }
+
+    const billHref = (b) => (b.upload ? `/api/bills?id=${b.upload}` : `https://drive.google.com/file/d/${encodeURIComponent(b.drive)}/view`);
+
+    // Admin review before approval: rows with their bills, category can be changed.
+    let reviewId = null;
+    function openReview(id) {
+      const inv = state.invoices.find((x) => x.id === id);
+      reviewId = id;
+      $('reviewTitle').innerText = `Review ${invNo(inv)} · ${inv.name}`;
+      $('reviewMeta').innerText = `${kindLabel(inv.kind)} invoice dated ${showDate(inv.date)}`;
+      $('reviewItems').innerHTML = `<table class="w-full"><tr><th class="th w-8">#</th><th class="th">Particulars</th><th class="th text-right">Amount</th>${inv.kind === 'reimbursement' ? '<th class="th">Bill</th>' : ''}</tr>
+        ${inv.items.map((it, n) => `<tr><td class="td text-slate-400">${n + 1}</td><td class="td whitespace-normal">${esc(it.particulars)}</td><td class="td text-right">${rs(it.amount)}</td>
+          ${inv.kind === 'reimbursement' ? `<td class="td">${it.bill ? `<a href="${billHref(it.bill)}" target="_blank" rel="noopener" class="btn"><i class="fa-solid fa-${it.bill.upload ? 'file-pdf' : 'brands fa-google-drive'}"></i>View bill</a>` : '<span class="text-xs text-slate-400">No bill</span>'}</td>` : ''}</tr>`).join('')}
+        <tr><td class="td"></td><td class="td font-semibold text-right">Grand Total</td><td class="td text-right font-semibold">${rs(inv.total)}</td>${inv.kind === 'reimbursement' ? '<td class="td"></td>' : ''}</tr></table>`;
+      $('reviewCategoryBox').classList.toggle('hidden', inv.kind !== 'reimbursement');
+      $('reviewCategory').innerHTML = categoryOptions(inv.categoryId || '');
+      openModal('reviewModal');
+    }
+
+    function approveReviewed() {
+      const id = reviewId;
+      const inv = state.invoices.find((x) => x.id === id);
+      const body = { action: 'decide', id, status: 'approved' };
+      if (inv.kind === 'reimbursement') body.categoryId = $('reviewCategory').value;
+      closeModal('reviewModal');
+      toast('Approving and copying the PDF to Google Drive…');
+      post(body).then((ok) => {
+        if (!ok) return;
+        const done = state.invoices.find((x) => x.id === id);
+        toast(done.driveUrl ? 'Invoice approved and saved to Google Drive' : 'Invoice approved, but the Drive copy failed (see the invoice)', done.driveUrl ? 'success' : 'error');
+      });
+    }
+
+    function rejectReviewed() {
+      closeModal('reviewModal');
+      reject(reviewId);
+    }
+
+    function renderCancelList() {
+      if (!state || state.me.role !== 'admin') return;
+      const approved = state.invoices.filter((i) => i.status === 'approved');
+      $('cancelPick').innerHTML = `<option value="">${approved.length ? 'Choose an invoice…' : 'No approved invoices'}</option>`
+        + approved.map((i) => `<option value="${i.id}">${invNo(i)} · ${esc(i.name)} · ${showDate(i.date)} · ${rs(i.total)}</option>`).join('');
+    }
+
+    async function cancelInvoice(e) {
+      e.preventDefault();
+      const inv = state.invoices.find((i) => i.id === Number($('cancelPick').value));
+      if (!inv) return;
+      if (!window.confirm(`Cancel ${invNo(inv)} for ${inv.name} (${rs(inv.total)})? It will be removed from the payout register. This cannot be undone.`)) return;
+      if (await post({ action: 'cancel', id: inv.id, reason: $('cancelReason').value }, `${invNo(inv)} cancelled`)) $('cancelReason').value = '';
+    }
+
     function reject(id) { rejectId = id; $('rejectNote').value = ''; openModal('rejectModal'); }
     async function submitReject(e) {
       e.preventDefault();
@@ -572,7 +669,7 @@
       const b = it.bill;
       if (b && b.busy) return `<span class="text-xs text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ${esc(b.name)}</span>`;
       if (b && (b.upload || b.drive)) {
-        const href = b.upload ? `/api/bills?id=${b.upload}` : `https://drive.google.com/file/d/${encodeURIComponent(b.drive)}/view`;
+        const href = billHref(b);
         return `<div class="flex items-center gap-2 text-xs"><a href="${href}" target="_blank" rel="noopener" class="text-emerald-700 underline truncate max-w-[9rem]" title="${esc(b.name)}"><i class="fa-solid fa-${b.upload ? 'file-pdf' : 'brands fa-google-drive'}"></i> ${esc(b.name)}</a>
           <button type="button" onclick="lineItems[${n}].bill=null; renderInvoiceItems()" aria-label="Remove bill, row ${n + 1}" class="text-slate-400 hover:text-red-700"><i class="fa-solid fa-xmark"></i></button></div>`;
       }
@@ -669,7 +766,7 @@ function doPost(e) {
   const out = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
   try {
     const body = JSON.parse(e.postData.contents);
-    if (body.secret !== SECRET) return out({ error: 'Wrong secret: copy the script again from Employer & Sheet' });
+    if (body.secret !== SECRET) return out({ error: 'Wrong secret: copy the script again from Settings (gear icon)' });
     const folder = DriveApp.getFolderById(body.folderId);
     const old = folder.getFilesByName(body.name);
     while (old.hasNext()) old.next().setTrashed(true); // re-copies replace the earlier file

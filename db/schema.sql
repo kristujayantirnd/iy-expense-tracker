@@ -67,8 +67,6 @@ create table if not exists invoices (
   unique (kind, number)
 );
 
-create unique index if not exists one_salary_invoice_per_month
-  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary';
 
 -- Scanned bills uploaded for reimbursement rows (files live in Vercel Blob). deleted_at = cleared from storage.
 create table if not exists bills (
@@ -83,4 +81,13 @@ create table if not exists bills (
 -- After approval: payment progress ('' | submitted | paid) and the copy saved to Google Drive.
 alter table invoices add column if not exists payment_status text not null default '';
 alter table invoices add column if not exists drive_url text not null default '';
-alter table invoices add column if not exists drive_error text not null default ''
+alter table invoices add column if not exists drive_error text not null default '';
+
+-- Optional direct-expense category for reimbursements, and admin can cancel approved invoices.
+alter table invoices add column if not exists category_id text references categories(id) on delete set null;
+alter table invoices drop constraint if exists invoices_status_check;
+alter table invoices add constraint invoices_status_check check (status in ('pending', 'approved', 'rejected', 'cancelled'));
+-- A cancelled salary invoice frees its month for a new one.
+drop index if exists one_salary_invoice_per_month;
+create unique index one_salary_invoice_per_month
+  on invoices (user_id, extract(year from invoice_date), extract(month from invoice_date)) where kind = 'salary' and status <> 'cancelled'

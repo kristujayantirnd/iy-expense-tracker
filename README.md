@@ -33,11 +33,13 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 
 - Employees raise **salary invoices** (pick a date; amount = salary set by admin; one per month) and **reimbursement invoices** (line items, totals calculated). Numbers run in two company-wide sequences: `SAL-0001…` and `RMB-0001…`.
 - Every reimbursement row needs a **bill PDF**: uploaded (max 2 MB, stored privately in Vercel Blob) or a Google Drive link shared as *Anyone with the link can view*. The invoice's **PDF** button gives one file: invoice page + all bill pages in row order.
-- Admin → *Employer & Sheet* → **Bill Storage** shows Blob usage (free plan: 1 GB) and deletes uploaded bills older than 3 months. Their invoices' PDFs then show a "bill deleted" page; Drive bills are untouched.
+- Admin → *Settings* (gear icon) → **Bill Storage** shows Blob usage (free plan: 1 GB) and deletes uploaded bills older than 3 months. Their invoices' PDFs then show a "bill deleted" page; Drive bills are untouched.
 - Admin approves (invoice is then locked) or rejects with a reason (employee can edit and resubmit).
+- Reimbursements can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change the category. The admin can also raise salary invoices for any employee.
+- **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, and frees that salary month.
 - After approval the admin sets **Submitted** → **Payment Completed** (dropdown on the invoice; still counts as approved).
-- **Google Drive copy:** on approval the invoice PDF (with bills) is saved to the Drive folder set in *Employer & Sheet*, through a small Google Apps Script the admin deploys once (code and steps are on that page). If the copy fails, approval still stands and the invoice shows the error with **Retry**.
+- **Google Drive copy:** on approval the invoice PDF (with bills) is saved to the Drive folder set in *Settings* (gear icon), through a small Google Apps Script the admin deploys once (code and steps are on that page). If the copy fails, approval still stands and the invoice shows the error with **Retry**.
 - **Payout register** (approved invoices only), per employee per month: gross salary − 10% TDS + reimbursements. Exports to CSV, or PDF via the browser's print dialog.
-- **Google Sheet:** Admin → *Employer & Sheet* shows an `=IMPORTDATA(...)` formula to paste into a sheet. It refreshes about hourly. The link's secret comes from `SESSION_SECRET`, so changing that secret changes the link.
+- **Google Sheet:** Admin → *Settings* (gear icon) shows an `=IMPORTDATA(...)` formula to paste into a sheet. It refreshes about hourly. The link's secret comes from `SESSION_SECRET`, so changing that secret changes the link.
 
 Commits must be authored as mary@invincibleyou.world, or Vercel (Hobby plan) blocks the deploy.

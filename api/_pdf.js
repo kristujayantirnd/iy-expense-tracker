@@ -68,7 +68,8 @@ export async function buildInvoicePdf(inv, loadBill) {
   right(`Date: ${showDate(inv.date)}`, M + W, y - 22);
   y -= 30;
   if (inv.status !== 'approved') {
-    text(`${inv.status.toUpperCase()} - NOT YET APPROVED`, M, y - 6, { f: bold, color: rgb(0.7, 0.33, 0.04) });
+    const label = inv.status === 'cancelled' ? 'CANCELLED - NOT PAYABLE' : `${inv.status.toUpperCase()} - NOT YET APPROVED`;
+    text(label, M, y - 6, { f: bold, color: rgb(0.7, 0.33, 0.04) });
     y -= 14;
   }
   y -= 12;
@@ -192,7 +193,7 @@ export async function copyToDrive(db, id) {
   try {
     const rows = await db`select key, value from settings where key in ('driveFolder', 'driveScript')`;
     const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    if (!cfg.driveFolder || !SCRIPT_URL.test(cfg.driveScript || '')) throw new Error('Set the Drive folder and script link in Employer & Sheet');
+    if (!cfg.driveFolder || !SCRIPT_URL.test(cfg.driveScript || '')) throw new Error('Set the Drive folder and script link in Settings (gear icon)');
     const out = await renderInvoicePdf(db, id);
     if (!out) throw new Error('Invoice not found');
     const res = await fetch(cfg.driveScript, {

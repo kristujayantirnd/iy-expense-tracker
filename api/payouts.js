@@ -60,12 +60,13 @@ const getDrive = async (db) => {
 // List queries leave out signatures (large); the invoice PDF reads the full copy.
 async function readState(db, me) {
   const all = me.role !== 'employee';
-  const [invoices, users] = await db.transaction([
+  const [invoices, categories, users] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
-              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
+              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", i.category_id as "categoryId", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
        from invoices i join users u on u.id = i.user_id
        where ${all} or i.user_id = ${me.id}
        order by i.invoice_date desc, i.id desc`,
+    db`select id, name from categories order by name`,
     all
       ? db`select id, email, role, salary::float8 as salary, coalesce(nullif(name, ''), profile->>'name', '') as name from users order by role, 5, email`
       : db`select 1 where false`,
@@ -75,58 +76,81 @@ async function readState(db, me) {
     me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature) },
     employer: await getEmployer(db),
     invoices,
+    categories,
     users: all ? users : [],
     sheetToken: me.role === 'admin' ? sheetToken() : undefined,
     drive: me.role === 'admin' ? { ...(await getDrive(db)), secret: driveToken() } : undefined,
   };
 }
 
+const LOCKED = ['approved', 'cancelled'];
+
+// Optional direct-expense category (tracker categories) for reimbursement invoices.
+async function categoryRef(db, v) {
+  if (v === undefined || v === null || v === '') return null;
+  const [c] = await db`select id from categories where id = ${String(v)}`;
+  if (!c) throw new Bad('That expense category no longer exists');
+  return c.id;
+}
+
 async function saveInvoice(db, me, body) {
-  if (!me.profile?.name) throw new Bad('Fill in your profile before raising an invoice');
+  const admin = me.role === 'admin';
   const invoiceDate = date(body.date);
   let kind = body.kind;
+  let ownerId = me.id;
   let existing = null;
   if (body.id) {
-    [existing] = await db`select kind, status from invoices where id = ${intId(body.id)} and user_id = ${me.id}`;
-    if (!existing) throw new Bad('Invoice not found');
-    if (existing.status === 'approved') throw new Bad('This invoice is approved and can no longer be edited');
+    [existing] = await db`select user_id, kind, status from invoices where id = ${intId(body.id)}`;
+    // Owners edit their own; the admin may also edit salary invoices (they can raise them for anyone).
+    if (!existing || (existing.user_id !== me.id && !(admin && existing.kind === 'salary'))) throw new Bad('Invoice not found');
+    if (LOCKED.includes(existing.status)) throw new Bad(`This invoice is ${existing.status} and can no longer be edited`);
     kind = existing.kind;
+    ownerId = existing.user_id;
+  } else if (body.userId && Number(body.userId) !== me.id) {
+    if (!admin || kind !== 'salary') throw new Bad('Only the admin can raise salary invoices for someone else');
+    ownerId = intId(body.userId);
   }
+  const [owner] = await db`select id, email, salary::float8 as salary, profile from users where id = ${ownerId}`;
+  if (!owner) throw new Bad('Employee not found');
+  const self = owner.id === me.id;
+  if (!owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
 
   let items;
+  let categoryId = null;
   if (kind === 'salary') {
-    if (!(me.salary > 0)) throw new Bad('Your salary has not been set by the admin yet');
+    if (!(owner.salary > 0)) throw new Bad(self ? 'Your salary has not been set by the admin yet' : "Set that employee's salary in Logins & Salaries first");
     const [y, m] = invoiceDate.split('-');
-    items = [{ particulars: `Salary for ${MONTHS[Number(m) - 1]} ${y}`, amount: me.salary }];
+    items = [{ particulars: `Salary for ${MONTHS[Number(m) - 1]} ${y}`, amount: owner.salary }];
   } else if (kind === 'reimbursement') {
     if (!Array.isArray(body.items) || !body.items.length) throw new Bad('Add at least one line item');
     if (body.items.length > 50) throw new Bad('Too many line items');
     items = body.items.map((it) => ({ particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
     // Uploaded bills must be the employee's own and still in storage.
     const ids = items.filter((it) => it.bill.upload).map((it) => it.bill.upload);
-    const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${me.id} and deleted_at is null` : [];
+    const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${owner.id} and deleted_at is null` : [];
     if (found.length !== new Set(ids).size) throw new Bad('A bill upload was not found, please attach it again');
+    categoryId = await categoryRef(db, body.categoryId);
   } else throw new Bad('Unknown invoice type');
 
   const total = Math.round(items.reduce((s, it) => s + it.amount * 100, 0)) / 100;
   const employer = JSON.stringify(await getEmployer(db));
-  const employee = JSON.stringify({ ...me.profile, email: me.email });
+  const employee = JSON.stringify({ ...owner.profile, email: owner.email });
   const itemsJson = JSON.stringify(items);
   try {
     if (existing) {
       // Editing (pending or rejected) sends it back for approval.
-      const rows = await db`update invoices set invoice_date = ${invoiceDate}, items = ${itemsJson}, total = ${total},
+      const rows = await db`update invoices set invoice_date = ${invoiceDate}, items = ${itemsJson}, total = ${total}, category_id = ${categoryId},
                               employer = ${employer}, employee = ${employee}, status = 'pending', note = ''
-                            where id = ${intId(body.id)} and user_id = ${me.id} and status <> 'approved' returning id`;
+                            where id = ${intId(body.id)} and status not in ('approved', 'cancelled') returning id`;
       if (!rows.length) throw new Bad('This invoice is approved and can no longer be edited');
     } else {
       // Max + 1 (not a sequence) so failed submissions never leave gaps; unique (kind, number) catches races.
-      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, employer, employee)
-               select ${me.id}, ${kind}, coalesce(max(number), 0) + 1, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}
+      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, category_id, employer, employee)
+               select ${owner.id}, ${kind}, coalesce(max(number), 0) + 1, ${invoiceDate}, ${itemsJson}, ${total}, ${categoryId}, ${employer}, ${employee}
                from invoices where kind = ${kind}`;
     }
   } catch (e) {
-    if (e.code === '23505' && e.constraint === 'one_salary_invoice_per_month') throw new Bad('You already have a salary invoice for that month');
+    if (e.code === '23505' && e.constraint === 'one_salary_invoice_per_month') throw new Bad(self ? 'You already have a salary invoice for that month' : 'That employee already has a salary invoice for that month');
     if (e.code === '23505') throw new Bad('Someone submitted at the same moment, please submit again');
     throw e;
   }
@@ -159,10 +183,25 @@ async function act(db, me, body) {
     case 'decide': {
       if (!admin) throw new Bad('Only the admin can approve invoices');
       if (!['approved', 'rejected'].includes(body.status)) throw new Bad('Unknown decision');
+      const id = intId(body.id);
+      // The admin may set or change the expense category while reviewing a reimbursement.
+      if (body.categoryId !== undefined) {
+        const categoryId = await categoryRef(db, body.categoryId);
+        await db`update invoices set category_id = ${categoryId} where id = ${id} and kind = 'reimbursement' and status = 'pending'`;
+      }
       const rows = await db`update invoices set status = ${body.status}, note = ${text(body.note, 500)}, decided_by = ${me.id}, decided_at = now()
-                            where id = ${intId(body.id)} and status = 'pending' returning id`;
+                            where id = ${id} and status = 'pending' returning id`;
       if (!rows.length) throw new Bad('Only pending invoices can be approved or rejected');
       if (body.status === 'approved') await copyToDrive(db, rows[0].id);
+      return;
+    }
+    case 'cancel': {
+      if (!admin) throw new Bad('Only the admin can cancel invoices');
+      const reason = text(body.reason, 500, true);
+      // decided_by / decided_at keep the original approval.
+      const rows = await db`update invoices set status = 'cancelled', note = ${'Cancelled: ' + reason}
+                            where id = ${intId(body.id)} and status = 'approved' returning id`;
+      if (!rows.length) throw new Bad('Only approved invoices can be cancelled');
       return;
     }
     case 'driveCopy': {
