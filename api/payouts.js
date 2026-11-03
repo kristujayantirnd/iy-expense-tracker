@@ -1,6 +1,6 @@
 import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken, driveToken } from './_lib.js';
-import { copyToDrive, SCRIPT_URL } from './_pdf.js';
-import { driveFileId } from './_bills.js';
+import { copyToDrive, deleteFromDrive, SCRIPT_URL } from './_pdf.js';
+import { clearInvoiceBills, driveFileId } from './_bills.js';
 
 const ROLES = ['admin', 'employee', 'management'];
 const EMPLOYER_FIELDS = ['companyName', 'accountNumber', 'bank', 'ifsc', 'micr', 'bankAddress', 'gstin', 'pan'];
@@ -62,7 +62,7 @@ async function readState(db, me) {
   const all = me.role !== 'employee';
   const [invoices, categories, users] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
-              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", i.category_id as "categoryId", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
+              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
        from invoices i join users u on u.id = i.user_id
        where ${all} or i.user_id = ${me.id}
        order by i.invoice_date desc, i.id desc`,
@@ -85,12 +85,16 @@ async function readState(db, me) {
 
 const LOCKED = ['approved', 'cancelled'];
 
-// Optional direct-expense category (tracker categories) for reimbursement invoices.
-async function categoryRef(db, v) {
-  if (v === undefined || v === null || v === '') return null;
-  const [c] = await db`select id from categories where id = ${String(v)}`;
-  if (!c) throw new Bad('That expense category no longer exists');
-  return c.id;
+// Optional direct-expense category (tracker categories) on each reimbursement row.
+// Returns the rows with categoryId checked (null when not picked).
+async function withCategories(db, items, picks) {
+  const ids = new Set((await db`select id from categories`).map((c) => c.id));
+  return items.map((it, n) => {
+    const v = picks[n];
+    if (v === undefined || v === null || v === '') return { ...it, categoryId: null };
+    if (!ids.has(String(v))) throw new Bad(`The expense category on row ${n + 1} no longer exists`);
+    return { ...it, categoryId: String(v) };
+  });
 }
 
 async function saveInvoice(db, me, body) {
@@ -116,7 +120,6 @@ async function saveInvoice(db, me, body) {
   if (!owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
 
   let items;
-  let categoryId = null;
   if (kind === 'salary') {
     if (!(owner.salary > 0)) throw new Bad(self ? 'Your salary has not been set by the admin yet' : "Set that employee's salary in Logins & Salaries first");
     const [y, m] = invoiceDate.split('-');
@@ -125,11 +128,11 @@ async function saveInvoice(db, me, body) {
     if (!Array.isArray(body.items) || !body.items.length) throw new Bad('Add at least one line item');
     if (body.items.length > 50) throw new Bad('Too many line items');
     items = body.items.map((it) => ({ particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
+    items = await withCategories(db, items, body.items.map((it) => it?.categoryId));
     // Uploaded bills must be the employee's own and still in storage.
     const ids = items.filter((it) => it.bill.upload).map((it) => it.bill.upload);
     const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${owner.id} and deleted_at is null` : [];
     if (found.length !== new Set(ids).size) throw new Bad('A bill upload was not found, please attach it again');
-    categoryId = await categoryRef(db, body.categoryId);
   } else throw new Bad('Unknown invoice type');
 
   const total = Math.round(items.reduce((s, it) => s + it.amount * 100, 0)) / 100;
@@ -139,14 +142,14 @@ async function saveInvoice(db, me, body) {
   try {
     if (existing) {
       // Editing (pending or rejected) sends it back for approval.
-      const rows = await db`update invoices set invoice_date = ${invoiceDate}, items = ${itemsJson}, total = ${total}, category_id = ${categoryId},
+      const rows = await db`update invoices set invoice_date = ${invoiceDate}, items = ${itemsJson}, total = ${total},
                               employer = ${employer}, employee = ${employee}, status = 'pending', note = ''
                             where id = ${intId(body.id)} and status not in ('approved', 'cancelled') returning id`;
       if (!rows.length) throw new Bad('This invoice is approved and can no longer be edited');
     } else {
       // Max + 1 (not a sequence) so failed submissions never leave gaps; unique (kind, number) catches races.
-      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, category_id, employer, employee)
-               select ${owner.id}, ${kind}, coalesce(max(number), 0) + 1, ${invoiceDate}, ${itemsJson}, ${total}, ${categoryId}, ${employer}, ${employee}
+      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, employer, employee)
+               select ${owner.id}, ${kind}, coalesce(max(number), 0) + 1, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}
                from invoices where kind = ${kind}`;
     }
   } catch (e) {
@@ -184,10 +187,13 @@ async function act(db, me, body) {
       if (!admin) throw new Bad('Only the admin can approve invoices');
       if (!['approved', 'rejected'].includes(body.status)) throw new Bad('Unknown decision');
       const id = intId(body.id);
-      // The admin may set or change the expense category while reviewing a reimbursement.
-      if (body.categoryId !== undefined) {
-        const categoryId = await categoryRef(db, body.categoryId);
-        await db`update invoices set category_id = ${categoryId} where id = ${id} and kind = 'reimbursement' and status = 'pending'`;
+      // The admin may set or change each row's expense category while reviewing a reimbursement.
+      if (Array.isArray(body.categories)) {
+        const [inv] = await db`select items from invoices where id = ${id} and kind = 'reimbursement' and status = 'pending'`;
+        if (inv) {
+          const items = await withCategories(db, inv.items, body.categories);
+          await db`update invoices set items = ${JSON.stringify(items)} where id = ${id} and status = 'pending'`;
+        }
       }
       const rows = await db`update invoices set status = ${body.status}, note = ${text(body.note, 500)}, decided_by = ${me.id}, decided_at = now()
                             where id = ${id} and status = 'pending' returning id`;
@@ -202,7 +208,17 @@ async function act(db, me, body) {
       const rows = await db`update invoices set status = 'cancelled', note = ${'Cancelled: ' + reason}
                             where id = ${intId(body.id)} and status = 'approved' returning id`;
       if (!rows.length) throw new Bad('Only approved invoices can be cancelled');
-      return;
+      // Free the uploaded bill files and remove the Drive copy.
+      const freed = await clearInvoiceBills(db, rows[0].id);
+      const drive = await deleteFromDrive(db, rows[0].id);
+      return { notice: { freed, driveDeleted: drive.deleted, driveError: drive.error } };
+    }
+    case 'driveDelete': {
+      if (!admin) throw new Bad('Only the admin can delete Drive copies');
+      const [inv] = await db`select status from invoices where id = ${intId(body.id)}`;
+      if (inv?.status !== 'cancelled') throw new Bad('Only cancelled invoices have their Drive copy deleted');
+      const drive = await deleteFromDrive(db, intId(body.id));
+      return { notice: { driveDeleted: drive.deleted, driveError: drive.error } };
     }
     case 'driveCopy': {
       if (!admin) throw new Bad('Only the admin can copy invoices to Drive');
@@ -269,9 +285,10 @@ export default async function handler(req, res) {
       return res.status(200).json({ rows: await registerRows(db, from, to) });
     }
     if (req.method === 'POST') {
-      await act(db, me, req.body);
+      const out = await act(db, me, req.body);
       // Re-read the user so profile/salary changes show up straight away.
       Object.assign(me, (await db`select profile from users where id = ${me.id}`)[0]);
+      return res.status(200).json({ ...(await readState(db, me)), notice: out?.notice });
     } else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     res.status(200).json(await readState(db, me));
   } catch (e) {

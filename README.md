@@ -35,8 +35,9 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 - Every reimbursement row needs a **bill PDF**: uploaded (max 2 MB, stored privately in Vercel Blob) or a Google Drive link shared as *Anyone with the link can view*. The invoice's **PDF** button gives one file: invoice page + all bill pages in row order.
 - Admin → *Settings* (gear icon) → **Bill Storage** shows Blob usage (free plan: 1 GB) and deletes uploaded bills older than 3 months. Their invoices' PDFs then show a "bill deleted" page; Drive bills are untouched.
 - Admin approves (invoice is then locked) or rejects with a reason (employee can edit and resubmit).
-- Reimbursements can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change the category. The admin can also raise salary invoices for any employee.
-- **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, and frees that salary month.
+- Each reimbursement row can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change each row's category. The admin can also raise salary invoices for any employee.
+- **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, frees that salary month, deletes its uploaded bill files (unless another live invoice uses them) and moves its Drive copy to Drive's trash. Cancelled invoices are hidden from the list unless the Cancelled filter is picked.
+- The invoice list shows 8 per page, with one search box for invoice number, type or employee name.
 - After approval the admin sets **Submitted** → **Payment Completed** (dropdown on the invoice; still counts as approved).
 - **Google Drive copy:** on approval the invoice PDF (with bills) is saved to the Drive folder set in *Settings* (gear icon), through a small Google Apps Script the admin deploys once (code and steps are on that page). If the copy fails, approval still stands and the invoice shows the error with **Retry**.
 - **Payout register** (approved invoices only), per employee per month: gross salary − 10% TDS + reimbursements. Exports to CSV, or PDF via the browser's print dialog.

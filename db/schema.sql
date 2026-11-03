@@ -85,6 +85,11 @@ alter table invoices add column if not exists drive_error text not null default 
 
 -- Optional direct-expense category for reimbursements, and admin can cancel approved invoices.
 alter table invoices add column if not exists category_id text references categories(id) on delete set null;
+-- Categories are now per row: copy any invoice-level category onto rows without one, then clear it.
+update invoices set items = (select jsonb_agg(case when it ? 'categoryId' then it else it || jsonb_build_object('categoryId', invoices.category_id) end)
+                             from jsonb_array_elements(items) it),
+                    category_id = null
+  where category_id is not null;
 alter table invoices drop constraint if exists invoices_status_check;
 alter table invoices add constraint invoices_status_check check (status in ('pending', 'approved', 'rejected', 'cancelled'));
 -- A cancelled salary invoice frees its month for a new one.

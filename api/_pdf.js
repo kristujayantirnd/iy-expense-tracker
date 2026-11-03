@@ -186,24 +186,47 @@ export async function renderInvoicePdf(db, id, onlyUserId = null) {
 
 export const SCRIPT_URL = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
 
+async function driveScript(db, payload) {
+  const rows = await db`select key, value from settings where key in ('driveFolder', 'driveScript')`;
+  const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  if (!cfg.driveFolder || !SCRIPT_URL.test(cfg.driveScript || '')) throw new Error('Set the Drive folder and script link in Settings (gear icon)');
+  const res = await fetch(cfg.driveScript, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' }, // Apps Script reads the raw body
+    body: JSON.stringify({ secret: driveToken(), folderId: cfg.driveFolder, ...payload }),
+    redirect: 'follow',
+  });
+  const reply = await res.json().catch(() => ({ error: `Drive script answered with HTTP ${res.status}. Check it is deployed with access "Anyone".` }));
+  if (reply.error) throw new Error(reply.error);
+  return reply;
+}
+
+// Trashes a cancelled invoice's Drive copy. Never throws; a failure is kept on the invoice for Retry.
+export async function deleteFromDrive(db, id) {
+  const [inv] = await db`select drive_url from invoices where id = ${id}`;
+  const fileId = (inv?.drive_url || '').match(/\/d\/([\w-]+)/)?.[1];
+  if (!fileId) return { deleted: false, error: '' };
+  try {
+    const reply = await driveScript(db, { action: 'delete', fileId });
+    if (!reply.deleted) throw new Error('Update the Drive script in Settings (gear icon) so it can delete files');
+    await db`update invoices set drive_url = '', drive_error = '' where id = ${id}`;
+    return { deleted: true, error: '' };
+  } catch (e) {
+    const error = String(e.message || e).slice(0, 300);
+    await db`update invoices set drive_error = ${error} where id = ${id}`;
+    return { deleted: false, error };
+  }
+}
+
 // Saves the approved invoice PDF into the admin's Drive folder via their Apps Script web app.
 // Never throws: the result (link or error) is stored on the invoice so the admin can retry.
 export async function copyToDrive(db, id) {
   let url = '', error = '';
   try {
-    const rows = await db`select key, value from settings where key in ('driveFolder', 'driveScript')`;
-    const cfg = Object.fromEntries(rows.map((r) => [r.key, r.value]));
-    if (!cfg.driveFolder || !SCRIPT_URL.test(cfg.driveScript || '')) throw new Error('Set the Drive folder and script link in Settings (gear icon)');
     const out = await renderInvoicePdf(db, id);
     if (!out) throw new Error('Invoice not found');
-    const res = await fetch(cfg.driveScript, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain' }, // Apps Script reads the raw body; text/plain avoids a preflight-style rejection
-      body: JSON.stringify({ secret: driveToken(), folderId: cfg.driveFolder, name: out.name, data: out.pdf.toString('base64') }),
-      redirect: 'follow',
-    });
-    const reply = await res.json().catch(() => ({ error: `Drive script answered with HTTP ${res.status}. Check it is deployed with access "Anyone".` }));
-    if (reply.error || !reply.url) throw new Error(reply.error || 'Drive script did not return a file link');
+    const reply = await driveScript(db, { name: out.name, data: out.pdf.toString('base64') });
+    if (!reply.url) throw new Error('Drive script did not return a file link');
     url = reply.url;
   } catch (e) {
     error = String(e.message || e).slice(0, 300);

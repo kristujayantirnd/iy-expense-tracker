@@ -46,9 +46,25 @@ export async function loadDrive(fileId) {
 // Deletes uploaded bills older than `months` from Blob storage; the bills row stays as a record.
 export async function clearOldBills(db, months) {
   const rows = await db`select id, pathname from bills where deleted_at is null and created_at < now() - make_interval(months => ${months})`;
+  return deleteBills(db, rows);
+}
+
+// Removes the files from Blob storage; the bills row stays (deleted_at set) as a record.
+async function deleteBills(db, rows) {
   if (rows.length) {
     await del(rows.map((r) => r.pathname));
     await db`update bills set deleted_at = now() where id = any(${rows.map((r) => r.id)})`;
   }
   return rows.length;
+}
+
+// Uploaded bills of a cancelled invoice, except any still attached to another invoice that isn't cancelled.
+export async function clearInvoiceBills(db, invoiceId) {
+  const rows = await db`
+    select distinct b.id, b.pathname from invoices i, jsonb_array_elements(i.items) it
+    join bills b on b.id = (it->'bill'->>'upload')::int
+    where i.id = ${invoiceId} and b.deleted_at is null
+      and not exists (select 1 from invoices o, jsonb_array_elements(o.items) oit
+                      where o.id <> i.id and o.status <> 'cancelled' and (oit->'bill'->>'upload')::int = b.id)`;
+  return deleteBills(db, rows);
 }
