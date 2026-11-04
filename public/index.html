@@ -7,6 +7,7 @@
   <link rel="icon" href="/iy-lockup.png">
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/modules.js"></script>
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Font Awesome Icons -->
@@ -104,16 +105,8 @@
             </select>
           </div>
 
-          <a href="/payouts.html" title="Payouts" aria-label="Payouts" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5">
-            <i class="fa-solid fa-file-invoice"></i>
-            <span class="hidden sm:inline">Payouts</span>
-          </a>
-
-          <!-- Project Tracker: separate app; /api/project-tracker signs you in there (single sign-on), new tab -->
-          <a href="/api/project-tracker" target="_blank" rel="noopener" title="Project Tracker (opens in a new tab)" aria-label="Project Tracker, opens in a new tab" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 transition flex items-center gap-1.5">
-            <i class="fa-solid fa-diagram-project"></i>
-            <span class="hidden sm:inline">Project Tracker</span>
-          </a>
+          <!-- Module switcher (public/modules.js): only the modules this person may open -->
+          <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-1"></nav>
 
           <!-- Executive Report Button -->
           <button onclick="openExecutiveReportModal()" title="Executive Report" aria-label="Executive Report" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#cc0000] hover:bg-[#a30000] text-white transition flex items-center gap-1.5 shadow-sm shadow-red-900/20">
@@ -723,6 +716,7 @@
       state = data;
       document.getElementById('currencySelector').value = state.currency;
       document.getElementById('currentUser').innerText = data.user || '';
+      renderModules(document.getElementById('moduleNav'), { role: data.role, ptLinked: data.ptLinked, current: 'tracker' });
       renderAllViews();
     }
 

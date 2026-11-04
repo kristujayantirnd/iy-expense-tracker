@@ -124,7 +124,8 @@ export default async function handler(req, res) {
     if (req.method === 'POST') await upsert(db, req.body?.type, req.body?.item);
     else if (req.method === 'DELETE') await remove(db, req.query.type, req.query.id);
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-    res.status(200).json({ ...(await readState(db)), user: user.email });
+    const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`;
+    res.status(200).json({ ...(await readState(db)), user: user.email, role: user.role, ptLinked: Boolean(ptLink) });
   } catch (e) {
     if (e instanceof Bad) return res.status(400).json({ error: e.message });
     console.error(e);

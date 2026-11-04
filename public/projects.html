@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invincible YOU · Project Tracker</title>
+  <link rel="icon" href="/iy-lockup.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Literata:wght@500;600;700&family=Source+Sans+3:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    // Same Invincible YOU theme as the other pages (slate scale flipped light, blue = IY purple).
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"Source Sans 3"', 'Arial', 'sans-serif'], serif: ['Literata', 'Georgia', 'serif'] },
+          colors: {
+            slate: { 100: '#1a1a1a', 200: '#1a1a1a', 300: '#364153', 400: '#484848', 500: '#6a7282', 600: '#8a8a8a', 700: '#e5e7eb', 800: '#f3f4f6', 900: '#ffffff', 950: '#fafafa' },
+            blue: { 50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087', 500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a' },
+          }
+        }
+      }
+    }
+  </script>
+  <script src="/modules.js"></script>
+  <style>h1 { font-family: Literata, Georgia, serif; }</style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased text-slate-200 bg-slate-950">
+  <header class="border-b border-slate-700 bg-white/90 shrink-0">
+    <div class="px-4 flex items-center justify-between h-14 gap-3">
+      <div class="flex items-center gap-4 min-w-0">
+        <img src="/iy-lockup.png" alt="Invincible YOU" class="h-7 sm:h-8 w-auto">
+        <h1 class="hidden sm:block border-l border-slate-700 pl-4 text-base font-semibold text-slate-100">Project Tracker</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 rounded-lg p-1"></nav>
+        <a href="/api/project-tracker" target="_blank" rel="noopener" title="Open the Project Tracker in a new tab" aria-label="Open the Project Tracker in a new tab" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"><i class="fa-solid fa-up-right-from-square"></i></a>
+        <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
+        <button onclick="logout()" title="Sign out" aria-label="Sign out" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+    </div>
+  </header>
+  <main class="flex-1 min-h-0 relative">
+    <p id="ptMessage" class="hidden max-w-lg mx-auto mt-16 px-4 text-sm text-slate-300"></p>
+    <!-- The Project Tracker is a separate app: /api/project-tracker signs the person in there (single sign-on). -->
+    <iframe id="ptFrame" title="Project Tracker" class="hidden absolute inset-0 w-full h-full border-0" allow="microphone; clipboard-write"></iframe>
+    <p class="absolute bottom-1 right-2 text-[11px] text-slate-500 bg-white/80 rounded px-1.5">Not loading? <a href="/api/project-tracker" target="_blank" rel="noopener" class="underline">Open in a new tab</a></p>
+  </main>
+  <script>
+    async function start() {
+      const res = await fetch('/api/payouts');
+      if (res.status === 401) { location.href = '/payouts.html?next=projects'; return; }
+      const state = await res.json().catch(() => null);
+      if (!res.ok || !state) { showMessage('Something went wrong, please try again.'); return; }
+      const me = state.me;
+      document.getElementById('currentUser').innerText = me.email;
+      renderModules(document.getElementById('moduleNav'), { role: me.role, ptLinked: me.ptLinked, current: 'projects' });
+      if (me.role === 'employee' && !me.ptLinked) {
+        showMessage('Your login is not linked to a Project Tracker owner yet. Ask the admin to link it (Settings, Project Tracker owners).');
+        return;
+      }
+      const frame = document.getElementById('ptFrame');
+      frame.src = '/api/project-tracker?embed=1';
+      frame.classList.remove('hidden');
+    }
+    function showMessage(text) {
+      const el = document.getElementById('ptMessage');
+      el.innerText = text;
+      el.classList.remove('hidden');
+    }
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+      location.href = '/payouts.html';
+    }
+    start();
+  </script>
+</body>
+</html>

@@ -25,6 +25,7 @@
       }
     }
   </script>
+  <script src="/modules.js"></script>
   <style type="text/tailwindcss">
     .card { @apply bg-white border border-slate-700 rounded-2xl shadow-sm; }
     .inp { @apply w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500 disabled:opacity-60; }
@@ -58,8 +59,7 @@
         <h1 class="hidden sm:block border-l border-slate-700 pl-4 text-base font-semibold text-slate-100">Payouts</h1>
       </div>
       <div class="flex items-center gap-2">
-        <a id="trackerLink" href="/" class="btn hidden"><i class="fa-solid fa-chart-pie"></i><span class="hidden sm:inline">Expense Tracker</span></a>
-        <a id="projectLink" href="/api/project-tracker" target="_blank" rel="noopener" class="btn hidden" title="Project Tracker (opens in a new tab)" aria-label="Project Tracker, opens in a new tab"><i class="fa-solid fa-diagram-project"></i><span class="hidden sm:inline">Project Tracker</span></a>
+        <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 rounded-lg p-1"></nav>
         <span id="currentUser" class="hidden sm:inline text-xs text-slate-400"></span>
         <button onclick="openPassword()" title="Change password" aria-label="Change password" class="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800">
           <i class="fa-solid fa-key"></i>
@@ -323,6 +323,18 @@
     </form>
   </div>
 
+  <!-- EARLIER SALARIES (the 'i' button in Logins & Salaries) -->
+  <div id="earlierModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4" onclick="if (event.target === this) closeModal('earlierModal')">
+    <div class="card w-full max-w-lg p-5 space-y-3 max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 id="earlierTitle" class="text-lg font-semibold text-slate-100"></h3>
+        <button type="button" onclick="closeModal('earlierModal')" aria-label="Close" class="p-1 text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="earlierLatest" class="text-sm text-slate-300"></p>
+      <div class="overflow-x-auto"><table class="w-full" id="earlierTable"></table></div>
+    </div>
+  </div>
+
   <!-- CHANGE PASSWORD -->
   <div id="passwordModal" class="fixed inset-0 bg-black/40 z-40 hidden flex items-center justify-center p-4">
     <form onsubmit="savePassword(event)" class="card w-full max-w-sm p-5 space-y-3">
@@ -424,8 +436,7 @@
       const firstLoad = !state || state.me.id !== data.me.id;
       state = data;
       $('currentUser').innerText = data.me.email;
-      $('trackerLink').classList.toggle('hidden', data.me.role === 'employee');
-      $('projectLink').classList.toggle('hidden', data.me.role === 'employee' && !data.me.ptLinked); // employees once linked to an owner
+      renderModules($('moduleNav'), { role: data.me.role, ptLinked: data.me.ptLinked, current: 'payouts' });
       $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
@@ -956,7 +967,7 @@ function doPost(e) {
       if (!state || state.me.role !== 'admin') return;
       $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th">Status</th><th class="th"></th></tr>`
         + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td capitalize">${u.role}</td>
-          <td class="td text-right">${rs(u.salary)}${u.nextSalary != null ? `<div class="text-xs text-blue-700">${rs(u.nextSalary)} from ${showDate(u.nextFrom)}</div>` : ''}</td>
+          <td class="td text-right">${earlierSalaries(u.id).length ? `<button class="text-slate-400 hover:text-blue-700 mr-1" onclick="showEarlierSalaries(${u.id})" title="Earlier salaries" aria-label="Earlier salaries for ${esc(u.name || u.email)}"><i class="fa-solid fa-circle-info"></i></button>` : ''}${rs(u.salary)}${u.nextSalary != null ? `<div class="text-xs text-blue-700">${rs(u.nextSalary)} from ${showDate(u.nextFrom)}</div>` : ''}</td>
           <td class="td"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${u.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-800 text-slate-400'}">${u.active ? 'Active' : 'Inactive'}</span></td>
           <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
     }
@@ -1004,6 +1015,30 @@ function doPost(e) {
             <td class="td text-right">${change}</td><td class="td whitespace-normal">${esc(r.note)}</td>
             <td class="td text-xs text-slate-400">${showDate(r.recordedOn)}${r.recordedBy ? ' · ' + esc(r.recordedBy) : ''}</td></tr>`;
         }).join('') || `<tr><td class="td text-slate-400" colspan="7">No salary revisions yet.</td></tr>`);
+    }
+
+    // Revisions before the latest one, newest first (the 'i' button).
+    function earlierSalaries(userId) {
+      const list = (state.revisions || []).filter((r) => r.userId === userId)
+        .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.id - b.id);
+      return list.slice(0, -1).reverse();
+    }
+
+    function showEarlierSalaries(userId) {
+      const u = state.users.find((x) => x.id === userId);
+      const all = (state.revisions || []).filter((r) => r.userId === userId)
+        .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.id - b.id);
+      const latest = all[all.length - 1];
+      $('earlierTitle').innerText = `Earlier salaries · ${u.name || u.email}`;
+      $('earlierLatest').innerText = `Latest revision: ${rs(latest.newSalary)} from ${showDate(latest.effectiveDate)}${latest.note ? ' (' + latest.note + ')' : ''}.`;
+      $('earlierTable').innerHTML = `<tr><th class="th">From</th><th class="th text-right">Salary</th><th class="th text-right">Change</th><th class="th">Note</th></tr>`
+        + earlierSalaries(userId).map((r) => {
+          const diff = r.oldSalary == null ? null : r.newSalary - r.oldSalary;
+          return `<tr><td class="td">${showDate(r.effectiveDate)}</td><td class="td text-right font-semibold">${rs(r.newSalary)}</td>
+            <td class="td text-right">${diff == null ? '<span class="text-slate-400">Starting salary</span>' : `<span class="${diff >= 0 ? 'text-emerald-700' : 'text-red-700'}">${diff >= 0 ? '+' : '−'}${rs(Math.abs(diff))}</span>`}</td>
+            <td class="td whitespace-normal">${esc(r.note)}</td></tr>`;
+        }).join('');
+      openModal('earlierModal');
     }
 
     function openUser(id) {
@@ -1063,9 +1098,10 @@ function doPost(e) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { $('loginError').innerText = data.error || 'Sign in failed'; return; }
-        // Came from the Project Tracker's "Sign in with Invincible YOU": go back there.
-        if (new URLSearchParams(location.search).get('next') === 'project-tracker') { location.href = '/api/project-tracker'; return; }
+        // Came from the Project Tracker (its "Sign in with Invincible YOU", or the Projects page): open it here.
+        if (['project-tracker', 'projects'].includes(new URLSearchParams(location.search).get('next'))) { location.href = '/projects.html'; return; }
         if (data.role === 'management') { location.href = '/'; return; } // Management's home is the Expense Tracker
+        if (data.role === 'employee' && data.ptLinked) { location.href = '/projects.html'; return; } // linked employees start in the Project Tracker
       } catch {
         $('loginError').innerText = 'Could not reach the server';
         return;

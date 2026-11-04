@@ -1,6 +1,6 @@
 # iy-expense-tracker
 
-Team & category expense allocation tracker, with a Payouts module and a launcher (header button, Admin and Management) for the separate Project Tracker at https://simis-project-tracker.vercel.app/. The launcher signs people in there (single sign-on, `PT_SSO_SECRET` set on both apps): Admin and Management get the full tracker; others, once linked to an owner in Settings → Project Tracker owners, go to their own projects and stages. Its password still works as a backup. Static page (`public/index.html`) + Vercel functions (`api/`) + Neon Postgres.
+Team & category expense allocation tracker, with a Payouts module and a launcher (header button, Admin and Management) for the separate Project Tracker at https://simis-project-tracker.vercel.app/. It opens inside this app (`/projects.html`, module switcher in every header showing only the modules each person may use) and signs people in there (single sign-on, `PT_SSO_SECRET` set on both apps): Admin and Management get the full tracker; others, once linked to an owner in Settings → Project Tracker owners, get their own and assigned stages, can mark them complete and add log entries, all recorded under their name. Linked employees land on the Project Tracker after signing in. Its password still works as a backup. Static page (`public/index.html`) + Vercel functions (`api/`) + Neon Postgres.
 
 Live: https://iy-expense-tracker.vercel.app — pushing to `main` deploys to production.
 

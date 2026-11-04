@@ -1,5 +1,6 @@
 // Single sign-on into the Project Tracker (a separate app with its own login).
-// GET                      -> signed-in user is sent to the Project Tracker with a one-time pass
+// GET [?embed=1]           -> signed-in user is sent to the Project Tracker with a one-time pass
+//                             (embed: shown inside this app's Projects page)
 // GET ?view=links          -> admin: Project Tracker owners, with the login each is linked to
 // POST {ownerId, userId}   -> admin: link an owner to a login (userId empty = unlink)
 import { createHmac, randomBytes } from 'node:crypto';
@@ -36,18 +37,19 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && !req.query.view) {
     // Not signed in here: sign in first, then come back.
     const userId = readSession(getCookie(req, 'sid'));
-    const [me] = userId ? await db`select id, role, active from users where id = ${userId}` : [];
+    const [me] = userId ? await db`select id, role, active, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where id = ${userId}` : [];
     if (!me) {
       res.setHeader('Location', '/payouts.html?next=project-tracker');
       return res.status(302).end();
     }
     if (!me.active) return page(res, 403, 'This login has been deactivated. Please contact the admin.');
-    const [link] = await db`select owner_id from pt_owner_links where user_id = ${me.id}`;
-    if (!['admin', 'management'].includes(me.role) && !link) {
+    const ownerIds = (await db`select owner_id from pt_owner_links where user_id = ${me.id} order by owner_name`).map((r) => r.owner_id);
+    if (!['admin', 'management'].includes(me.role) && !ownerIds.length) {
       return page(res, 403, 'Your login is not linked to a Project Tracker owner yet. Ask the admin to link it (Settings, Project Tracker owners).');
     }
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Location', `${PT_URL}/api/auth?sso=${makePass({ uid: me.id, role: me.role, ownerId: link?.owner_id || null })}`);
+    const pass = makePass({ uid: me.id, name: me.name, role: me.role, ownerIds, embed: req.query.embed === '1' });
+    res.setHeader('Location', `${PT_URL}/api/auth?sso=${pass}`);
     return res.status(302).end();
   }
 
