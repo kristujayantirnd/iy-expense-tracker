@@ -74,8 +74,10 @@ export async function buildInvoicePdf(inv, loadBill) {
   }
   y -= 12;
 
+  // Direct expense: no employee, "Direct Expense" in their place.
+  const direct = Boolean(inv.direct || emp.direct);
   boxes(
-    { title: 'From', lines: [['', emp.name], ['', emp.address], ['Contact', emp.phone], ['Email', emp.email], ['PAN', emp.pan]] },
+    { title: 'From', lines: direct ? [['', 'Direct Expense']] : [['', emp.name], ['', emp.address], ['Contact', emp.phone], ['Email', emp.email], ['PAN', emp.pan]] },
     { title: 'Bill To', lines: [['', er.companyName], ['GSTIN', er.gstin], ['PAN', er.pan]] },
   );
 
@@ -119,7 +121,8 @@ export async function buildInvoicePdf(inv, loadBill) {
   y -= 32;
 
   boxes(
-    { title: 'Pay to (employee bank)', lines: [['Account No', emp.accountNumber], ['Bank', emp.bank], ['Branch', emp.branch], ['IFSC', emp.ifsc]] },
+    direct ? { title: 'Paid as', lines: [['', 'Direct Expense']] }
+      : { title: 'Pay to (employee bank)', lines: [['Account No', emp.accountNumber], ['Bank', emp.bank], ['Branch', emp.branch], ['IFSC', emp.ifsc]] },
     { title: 'Employer bank', lines: [['Account No', er.accountNumber], ['Bank', er.bank], ['IFSC', er.ifsc], ['MICR', er.micr], ['Address', er.bankAddress]] },
   );
 
@@ -133,7 +136,7 @@ export async function buildInvoicePdf(inv, loadBill) {
   // Signature block
   ensure(90);
   const sigX = M + W - 200;
-  const sig = String(emp.signature || '').match(/^data:image\/(png|jpeg);base64,(.+)$/);
+  const sig = direct ? null : String(emp.signature || '').match(/^data:image\/(png|jpeg);base64,(.+)$/);
   if (sig) {
     try {
       const img = sig[1] === 'png' ? await doc.embedPng(Buffer.from(sig[2], 'base64')) : await doc.embedJpg(Buffer.from(sig[2], 'base64'));
@@ -143,8 +146,11 @@ export async function buildInvoicePdf(inv, loadBill) {
       /* unreadable signature image: leave the space blank */
     }
   }
-  page.drawLine({ start: { x: sigX, y: y - 66 }, end: { x: sigX + 200, y: y - 66 }, thickness: 0.8 });
-  right(emp.name || '', sigX + 200, y - 80);
+  if (direct) right('Direct Expense', sigX + 200, y - 66, { f: bold });
+  else {
+    page.drawLine({ start: { x: sigX, y: y - 66 }, end: { x: sigX + 200, y: y - 66 }, thickness: 0.8 });
+    right(emp.name || '', sigX + 200, y - 80);
+  }
   if (inv.status === 'approved' && inv.approvedBy) {
     text('Approved by', M, y - 52, { f: bold, size: 9, color: GREY });
     text(inv.approvedBy, M, y - 66, { f: bold, size: 11 });
@@ -172,7 +178,8 @@ export async function buildInvoicePdf(inv, loadBill) {
 // Loads an invoice (optionally limited to one user's own) and renders it with its bills.
 export async function renderInvoicePdf(db, id, onlyUserId = null) {
   const [inv] = await db`select i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items, i.total::float8 as total,
-                                i.status, i.employer, i.employee, coalesce(nullif(u.name, ''), u.profile->>'name', u.email) as "userName",
+                                i.status, i.employer, i.employee, i.direct,
+                                case when i.direct then 'Direct Expense' else coalesce(nullif(u.name, ''), u.profile->>'name', u.email) end as "userName",
                                 coalesce(nullif(a.name, ''), nullif(a.profile->>'name', ''), a.email) as "approvedBy",
                                 to_char(i.decided_at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as "approvedOn"
                          from invoices i join users u on u.id = i.user_id left join users a on a.id = i.decided_by

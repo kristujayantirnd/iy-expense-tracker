@@ -51,7 +51,7 @@ async function reimbursementRows(db, from, to) {
   const DAY = /^\d{4}-\d{2}-\d{2}$/;
   if (!DAY.test(String(from)) || !DAY.test(String(to))) throw new Bad('Pick a valid date range');
   return db`select i.id as "invoiceId", i.number, i.status, i.payment_status as "paymentStatus",
-                   coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as employee,
+                   case when i.direct then 'Direct Expense' else coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) end as employee,
                    it->>'date' as date, it->>'particulars' as particulars, (it->>'amount')::float8 as amount, it->>'categoryId' as "categoryId"
             from invoices i join users u on u.id = i.user_id, jsonb_array_elements(i.items) it
             where i.kind = 'reimbursement' and i.status in ('pending', 'approved')

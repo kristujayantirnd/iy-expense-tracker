@@ -62,7 +62,7 @@ async function readState(db, me) {
   const all = me.role !== 'employee';
   const [invoices, categories, users, revisions] = await db.transaction([
     db`select i.id, i.user_id as "userId", i.kind, i.number, to_char(i.invoice_date, 'YYYY-MM-DD') as date, i.items,
-              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", u.email, coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) as name
+              i.total::float8 as total, i.status, i.note, i.payment_status as "paymentStatus", i.drive_url as "driveUrl", i.drive_error as "driveError", i.direct, u.email, case when i.direct then 'Direct Expense' else coalesce(nullif(u.name, ''), nullif(u.profile->>'name', ''), u.email) end as name
        from invoices i join users u on u.id = i.user_id
        where ${all} or i.user_id = ${me.id}
        order by i.invoice_date desc, i.id desc`,
@@ -96,6 +96,7 @@ async function readState(db, me) {
     users: all ? users : [],
     revisions,
     sheetToken: me.role === 'admin' ? sheetToken() : undefined,
+    expenses: me.role === 'admin' ? await db`select id, title, amount::float8 as amount, category_id as "categoryId", type from expenses order by title` : undefined,
     drive: me.role === 'admin' ? { ...(await getDrive(db)), secret: driveToken() } : undefined,
   };
 }
@@ -134,27 +135,33 @@ async function saveInvoice(db, me, body) {
   let ownerId = me.id;
   let existing = null;
   if (body.id) {
-    [existing] = await db`select user_id, kind, status, items from invoices where id = ${intId(body.id)}`;
+    [existing] = await db`select user_id, kind, status, items, direct from invoices where id = ${intId(body.id)}`;
     // Owners edit their own; the admin may also edit salary invoices (they can raise them for anyone).
     if (!existing || (existing.user_id !== me.id && !(admin && existing.kind === 'salary'))) throw new Bad('Invoice not found');
     if (LOCKED.includes(existing.status)) throw new Bad(`This invoice is ${existing.status} and can no longer be edited`);
     kind = existing.kind;
     ownerId = existing.user_id;
   } else if (body.userId && Number(body.userId) !== me.id) {
-    if (!admin || kind !== 'salary') throw new Bad('Only the admin can raise salary invoices for someone else');
+    if (!admin || !['salary', 'reimbursement'].includes(kind)) throw new Bad('Only the admin can raise invoices for someone else');
     ownerId = intId(body.userId);
   }
+  // Direct expense: a reimbursement for the company's direct expenses, raised by the admin, no employee.
+  const direct = existing ? Boolean(existing.direct) : body.direct === true;
+  if (direct && (!admin || kind !== 'reimbursement')) throw new Bad('Only the admin can raise direct-expense invoices');
+  if (direct) ownerId = me.id;
   const [owner] = await db`select id, email, salary::float8 as salary, profile, active from users where id = ${ownerId}`;
   if (!owner) throw new Bad('Employee not found');
   if (!owner.active) throw new Bad('That login is inactive');
   const self = owner.id === me.id;
-  if (!owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
+  if (!direct && !owner.profile?.name) throw new Bad(self ? 'Fill in your profile before raising an invoice' : 'That employee has not filled in their profile yet');
 
   // Reimbursements collect on one open (pending or rejected) invoice per employee until it is approved.
   let incoming = body.items;
   if (kind === 'reimbursement' && !existing) {
-    const [open] = await db`select id, user_id, kind, status, items from invoices
-                            where user_id = ${owner.id} and kind = 'reimbursement' and status in ('pending', 'rejected')`;
+    const [open] = direct
+      ? await db`select id, user_id, kind, status, items, direct from invoices where direct and kind = 'reimbursement' and status in ('pending', 'rejected')`
+      : await db`select id, user_id, kind, status, items, direct from invoices
+                 where user_id = ${owner.id} and kind = 'reimbursement' and status in ('pending', 'rejected') and not direct`;
     if (open) {
       existing = open;
       body = { ...body, id: open.id };
@@ -183,18 +190,23 @@ async function saveInvoice(db, me, body) {
   } else if (kind === 'reimbursement') {
     if (!Array.isArray(incoming) || !incoming.length) throw new Bad('Add at least one line item');
     if (incoming.length > 50) throw new Bad('Too many line items on this invoice (50 at most)');
-    items = incoming.map((it) => ({ date: rowDate(it?.date), particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill) }));
+    items = incoming.map((it) => ({ date: rowDate(it?.date), particulars: text(it?.particulars, 300, true), amount: money(it?.amount), bill: billRef(it?.bill),
+      ...(it?.expenseId ? { expenseId: text(it.expenseId, 64) } : {}) }));
+    // direct-expense rows point at an Expense Tracker direct expense
+    const expIds = [...new Set(items.filter((it) => it.expenseId).map((it) => it.expenseId))];
+    if (expIds.length && (await db`select id from expenses where id = any(${expIds})`).length !== expIds.length) throw new Bad('A direct expense on this invoice no longer exists');
     items = await withCategories(db, items, incoming.map((it) => it?.categoryId));
     invoiceDate = items.reduce((d, it) => (it.date > d ? it.date : d), items[0].date); // latest row
     // Uploaded bills must be the employee's own and still in storage.
     const ids = items.filter((it) => it.bill.upload).map((it) => it.bill.upload);
-    const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = ${owner.id} and deleted_at is null` : [];
+    // the employee's own uploads, or ones the admin uploaded while raising it for them
+    const found = ids.length ? await db`select id from bills where id = any(${ids}) and user_id = any(${[owner.id, me.id]}) and deleted_at is null` : [];
     if (found.length !== new Set(ids).size) throw new Bad('A bill upload was not found, please attach it again');
   } else throw new Bad('Unknown invoice type');
 
   const total = Math.round(items.reduce((s, it) => s + it.amount * 100, 0)) / 100;
   const employer = JSON.stringify(await getEmployer(db));
-  const employee = JSON.stringify({ ...owner.profile, email: owner.email });
+  const employee = JSON.stringify(direct ? { direct: true } : { ...owner.profile, email: owner.email });
   const itemsJson = JSON.stringify(items);
   try {
     if (existing) {
@@ -206,8 +218,8 @@ async function saveInvoice(db, me, body) {
     } else {
       // Salary: max + 1 (not a sequence) so failed submissions never leave gaps; unique (kind, number) catches races.
       // Reimbursement: numbered only when approved.
-      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, employer, employee)
-               select ${owner.id}, ${kind}, case when ${kind} = 'salary' then coalesce(max(number), 0) + 1 end, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}
+      await db`insert into invoices (user_id, kind, number, invoice_date, items, total, employer, employee, direct)
+               select ${owner.id}, ${kind}, case when ${kind} = 'salary' then coalesce(max(number), 0) + 1 end, ${invoiceDate}, ${itemsJson}, ${total}, ${employer}, ${employee}, ${direct}
                from invoices where kind = ${kind}`;
     }
   } catch (e) {

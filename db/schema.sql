@@ -128,4 +128,11 @@ create table if not exists pt_owner_links (
   owner_id text primary key,
   owner_name text not null default '',
   user_id int not null unique references users(id) on delete cascade
-)
+);
+
+-- Direct-expense reimbursements (raised by the admin from the Expense Tracker's direct expenses):
+-- no employee, not in the payout register, one open company-wide invoice at a time.
+alter table invoices add column if not exists direct boolean not null default false;
+drop index if exists one_open_reimbursement;
+create unique index one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected') and not direct;
+create unique index if not exists one_open_direct on invoices (direct) where direct and kind = 'reimbursement' and status in ('pending', 'rejected')
