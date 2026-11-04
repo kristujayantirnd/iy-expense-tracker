@@ -4,7 +4,7 @@ function renderModules(el, { role, ptLinked, current }) {
   const staff = role === 'admin' || role === 'management';
   const mods = [
     { key: 'tracker', label: 'Expense Tracker', href: '/', icon: 'fa-chart-pie', show: staff },
-    { key: 'payouts', label: 'Payouts', href: '/payouts.html', icon: 'fa-file-invoice', show: true },
+    { key: 'payouts', label: 'Invoicing', href: '/payouts.html', icon: 'fa-file-invoice', show: true },
     { key: 'projects', label: 'Project Tracker', href: '/projects.html', icon: 'fa-diagram-project', show: staff || ptLinked },
   ].filter((m) => m.show);
   el.setAttribute('aria-label', 'Modules');

@@ -546,6 +546,19 @@
   </div>
 
   <!-- MODAL: EXECUTIVE REPORT -->
+  <!-- Earlier salaries (the 'i' button in the Executive Report) -->
+  <div id="earlierModal" class="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4 hidden" onclick="if (event.target === this) this.classList.add('hidden')">
+    <div class="glass-card w-full max-w-lg rounded-2xl p-5 space-y-3 max-h-[85vh] overflow-y-auto">
+      <div class="flex items-center justify-between">
+        <h3 id="earlierTitle" class="text-sm font-bold text-slate-100"></h3>
+        <button type="button" onclick="document.getElementById('earlierModal').classList.add('hidden')" aria-label="Close" class="text-slate-400 hover:text-slate-100"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p id="earlierLatest" class="text-xs text-slate-300"></p>
+      <table class="w-full text-xs"><thead><tr class="text-slate-400 text-left"><th class="py-1 pr-3 font-semibold">From</th><th class="py-1 pr-3 font-semibold text-right">Salary</th><th class="py-1 pr-3 font-semibold text-right">Change</th><th class="py-1 font-semibold">Note</th></tr></thead>
+        <tbody id="earlierRows"></tbody></table>
+    </div>
+  </div>
+
   <div id="executiveReportModal" class="fixed inset-0 bg-black/40 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
     <div class="bg-slate-900 border border-slate-800 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
       <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/90">
@@ -1629,11 +1642,35 @@
       teamContainer.innerHTML = state.employees.map(e => `
         <div class="flex justify-between items-center text-xs">
           <span class="text-slate-200 font-semibold">${esc(e.name)} <span class="text-slate-400 font-normal">(${esc(e.role || 'Member')})</span></span>
-          <span class="text-indigo-400 font-bold">Base Salary: ${formatCurrency(e.baseSalary)}</span>
+          <span class="text-indigo-400 font-bold">${earlierSalaries(e.id).length ? `<button type="button" onclick="showEarlierSalaries('${e.id}')" class="text-slate-400 hover:text-indigo-400 mr-1" title="Earlier salaries" aria-label="Earlier salaries for ${esc(e.name)}"><i class="fa-solid fa-circle-info"></i></button>` : ''}Base Salary: ${formatCurrency(e.baseSalary)}</span>
         </div>
       `).join('');
 
       modal.classList.remove('hidden');
+    }
+
+    // EARLIER SALARIES ('i' button): revisions before the latest one, newest first.
+    function salaryRevisions(employeeId) {
+      return (state.revisions || []).filter((r) => r.employeeId === employeeId)
+        .sort((a, b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.id - b.id);
+    }
+    function earlierSalaries(employeeId) { return salaryRevisions(employeeId).slice(0, -1).reverse(); }
+
+    function showEarlierSalaries(employeeId) {
+      const emp = state.employees.find((e) => e.id === employeeId);
+      const all = salaryRevisions(employeeId);
+      const latest = all[all.length - 1];
+      const day = (s) => new Date(s + 'T00:00:00').toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      const inr = (n) => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      document.getElementById('earlierTitle').innerText = `Earlier salaries · ${emp ? emp.name : ''}`;
+      document.getElementById('earlierLatest').innerText = latest ? `Latest revision: ${inr(latest.newSalary)} from ${day(latest.effectiveDate)}${latest.note ? ' (' + latest.note + ')' : ''}.` : '';
+      document.getElementById('earlierRows').innerHTML = earlierSalaries(employeeId).map((r) => {
+        const diff = r.oldSalary == null ? null : r.newSalary - r.oldSalary;
+        return `<tr class="border-t border-slate-800"><td class="py-2 pr-3">${day(r.effectiveDate)}</td><td class="py-2 pr-3 text-right font-semibold">${inr(r.newSalary)}</td>
+          <td class="py-2 pr-3 text-right">${diff == null ? '<span class="text-slate-400">Starting salary</span>' : `<span class="${diff >= 0 ? 'text-emerald-400' : 'text-red-400'}">${diff >= 0 ? '+' : '−'}${inr(Math.abs(diff))}</span>`}</td>
+          <td class="py-2">${esc(r.note)}</td></tr>`;
+      }).join('');
+      document.getElementById('earlierModal').classList.remove('hidden');
     }
 
     function closeExecutiveReportModal() {

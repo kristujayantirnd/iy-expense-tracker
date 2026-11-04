@@ -170,10 +170,12 @@
       <div class="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h2 class="text-lg font-semibold text-slate-100">Employees Salary</h2>
-          <p class="text-xs text-slate-400">Salary History: every salary revision with its effective date.<span id="historyHint"> Record a hike by editing the login's salary in Logins &amp; Salaries.</span></p>
+          <p class="text-xs text-slate-400">Current salaries (ⓘ shows earlier ones) and every salary revision with its effective date.<span id="historyHint"> Record a hike by editing the login's salary in Logins &amp; Salaries.</span></p>
         </div>
         <select id="historyUser" onchange="renderSalaryHistory()" class="inp !w-auto !py-1.5 text-xs" aria-label="Show salary history for"></select>
       </div>
+      <div class="overflow-x-auto"><table class="w-full" id="currentSalaryTable"></table></div>
+      <h3 class="text-base font-semibold text-slate-100 pt-2">Salary History</h3>
       <div class="overflow-x-auto"><table class="w-full" id="historyTable"></table></div>
     </section>
 
@@ -997,6 +999,10 @@ function doPost(e) {
 
     function renderSalaryHistory() {
       if (!state || state.me.role === 'employee') return;
+      // current salary per person, 'i' = earlier salaries
+      $('currentSalaryTable').innerHTML = `<tr><th class="th">Employee</th><th class="th">Role</th><th class="th text-right">Current salary</th></tr>`
+        + state.users.filter((u) => u.active).map((u) => `<tr><td class="td">${esc(u.name || u.email)}</td><td class="td capitalize">${u.role}</td>
+          <td class="td text-right">${earlierSalaries(u.id).length ? `<button class="text-slate-400 hover:text-blue-700 mr-1" onclick="showEarlierSalaries(${u.id})" title="Earlier salaries" aria-label="Earlier salaries for ${esc(u.name || u.email)}"><i class="fa-solid fa-circle-info"></i></button>` : ''}${rs(u.salary)}${u.nextSalary != null ? `<div class="text-xs text-blue-700">${rs(u.nextSalary)} from ${showDate(u.nextFrom)}</div>` : ''}</td></tr>`).join('');
       $('historyHint').classList.toggle('hidden', state.me.role !== 'admin');
       const pick = $('historyUser');
       const keep = pick.value;

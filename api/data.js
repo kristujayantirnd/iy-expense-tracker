@@ -23,7 +23,7 @@ const id = (v) => {
 };
 
 async function readState(db) {
-  const [settings, categories, employees, expenses] = await db.transaction([
+  const [settings, categories, employees, expenses, revisions] = await db.transaction([
     db`select key, value from settings`,
     db`select id, name, budget::float8 as budget, color from categories order by created_at, id`,
     // Directory = every login (all are employees; Payouts > Logins & Salaries); the employees row 'u<userId>' adds designation + split.
@@ -36,9 +36,13 @@ async function readState(db) {
        from users u left join employees e on e.id = 'u' || u.id
        order by 2`,
     db`select id, title, category_id as "categoryId", type, amount::float8 as amount, notes from expenses order by created_at, id`,
+    // salary revisions, keyed like the directory ('u<userId>'), for the Executive Report's earlier-salaries button
+    db`select 'u' || user_id as "employeeId", id, old_salary::float8 as "oldSalary", new_salary::float8 as "newSalary",
+              to_char(effective_date, 'YYYY-MM-DD') as "effectiveDate", note
+       from salary_revisions order by user_id, effective_date, id`,
   ]);
   const currency = settings.find((s) => s.key === 'currency')?.value || 'INR';
-  return { currency, categories, employees, expenses };
+  return { currency, categories, employees, expenses, revisions };
 }
 
 // Categorised reimbursement rows entered between from and to (by row date), from invoices that are
