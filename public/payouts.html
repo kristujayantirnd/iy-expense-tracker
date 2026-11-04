@@ -94,6 +94,7 @@
           </select>
           <button onclick="openInvoice('salary')" class="btn-primary"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
           <button onclick="openInvoice('reimbursement')" class="btn-primary"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
+          <button id="directBtn" onclick="openInvoice('direct')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Direct Expenses</button>
         </div>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="invoiceTable"></table></div>
@@ -283,17 +284,17 @@
         <div><label class="lbl">Invoice number</label><input id="invNumber" class="inp" disabled></div>
         <div id="invDateBox"><label class="lbl" for="invDate">Invoice date</label><input id="invDate" type="date" required class="inp" oninput="renderInvoiceItems()"></div>
         <div id="invDateNote" class="hidden"><label class="lbl">Invoice date</label><p class="text-sm text-slate-200 py-2">Latest row's date. Numbered when approved.</p></div>
-        <!-- Admin, reimbursements: raise for an employee (type to search) or as a direct expense -->
-        <div id="invRaiseBox" class="hidden sm:col-span-2 grid sm:grid-cols-2 gap-3">
-          <div><span class="lbl">Raise for</span>
-            <div class="flex gap-1 bg-slate-800 rounded-lg p-1 w-fit" role="radiogroup" aria-label="Raise for">
-              <label class="px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer has-[:checked]:bg-blue-600 has-[:checked]:text-white"><input type="radio" name="raiseFor" value="employee" class="sr-only" onchange="setRaiseFor('employee')"> Employee</label>
-              <label class="px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer has-[:checked]:bg-blue-600 has-[:checked]:text-white"><input type="radio" name="raiseFor" value="direct" class="sr-only" onchange="setRaiseFor('direct')"> Direct Expense</label>
+        <!-- Admin, reimbursements: raise for any employee (dropdown, type to filter) -->
+        <div id="invRaiseBox" class="hidden">
+          <div id="invPersonBox"><label class="lbl" for="invPerson">Employee</label>
+            <!-- Dropdown with type-to-filter: click or type; arrows + Enter to pick -->
+            <div class="relative">
+              <input id="invPerson" role="combobox" aria-expanded="false" aria-controls="invPeople" aria-autocomplete="list" autocomplete="off"
+                class="inp pr-9" placeholder="Choose, or type to filter" onfocus="openPeople(true)" onclick="openPeople(true)" oninput="openPeople(false)"
+                onkeydown="peopleKey(event)" onblur="setTimeout(closePeople, 150)">
+              <button type="button" tabindex="-1" aria-label="Show all employees" onmousedown="event.preventDefault(); togglePeople()" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400"><i class="fa-solid fa-chevron-down text-xs"></i></button>
+              <ul id="invPeople" role="listbox" aria-label="Employees" class="hidden absolute z-50 mt-1 w-full max-h-60 overflow-y-auto bg-white border border-slate-700 rounded-xl shadow-lg py-1"></ul>
             </div>
-          </div>
-          <div id="invPersonBox"><label class="lbl" for="invPerson">Employee (type to search)</label>
-            <input id="invPerson" list="invPeople" class="inp" autocomplete="off" placeholder="Start typing a name or email" onchange="pickPerson(this.value)">
-            <datalist id="invPeople"></datalist>
           </div>
         </div>
         <div id="invUserBox" class="hidden"><label class="lbl" for="invUser">Employee</label><select id="invUser" class="inp" onchange="editing.userId = Number(this.value); editing.amount = null; renderInvoiceItems()"></select></div>
@@ -473,6 +474,7 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       renderModules($('moduleNav'), { role: data.me.role, ptLinked: data.me.ptLinked, current: 'payouts' });
+      $('directBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
@@ -598,8 +600,11 @@
     function openInvoice(kind, inv) {
       // Reimbursements collect on one open invoice: "new" opens it with a fresh row added.
       let addRowToOpen = false;
+      // "Direct Expenses" (admin): a reimbursement-type invoice for the company's direct expenses, no employee.
+      const wantDirect = kind === 'direct';
+      if (wantDirect) kind = 'reimbursement';
       if (!inv && kind === 'reimbursement') {
-        inv = state.invoices.find((i) => i.userId === state.me.id && !i.direct && i.kind === 'reimbursement' && isOpen(i));
+        inv = state.invoices.find((i) => (wantDirect ? i.direct : i.userId === state.me.id && !i.direct) && i.kind === 'reimbursement' && isOpen(i));
         addRowToOpen = Boolean(inv);
       }
       editing = inv ? { id: inv.id, kind: inv.kind, number: inv.number == null ? 'Numbered when approved' : invNo(inv), userId: inv.userId }
@@ -614,20 +619,17 @@
         $('invUser').disabled = Boolean(inv);
       }
       const reimb = editing.kind === 'reimbursement';
-      editing.direct = Boolean(inv && inv.direct);
-      // Admin raising a reimbursement: for any employee, or as a direct expense.
-      const raise = state.me.role === 'admin' && reimb;
+      editing.direct = wantDirect || Boolean(inv && inv.direct);
+      // Admin raising a reimbursement: for any employee (not for direct expenses).
+      const raise = state.me.role === 'admin' && reimb && !editing.direct;
       $('invRaiseBox').classList.toggle('hidden', !raise);
       if (raise) {
-        $('invPeople').innerHTML = state.users.filter((u) => u.active).map((u) => `<option value="${esc(personLabel(u))}"></option>`).join('');
-        document.querySelector(`input[name="raiseFor"][value="${editing.direct ? 'direct' : 'employee'}"]`).checked = true;
-        document.querySelectorAll('input[name="raiseFor"]').forEach((r) => (r.disabled = Boolean(inv) && !addRowToOpen));
-        $('invPersonBox').classList.toggle('hidden', editing.direct);
         $('invPerson').value = personLabel(state.users.find((u) => u.id === editing.userId) || state.me);
         $('invPerson').disabled = Boolean(inv) && !addRowToOpen;
       }
-      $('invoiceTitle').innerText = addRowToOpen ? 'Add to your open Reimbursement Invoice'
-        : editing.direct ? (inv ? 'Edit Direct Expense Invoice' : 'New Direct Expense Invoice')
+      $('invoiceTitle').innerText = editing.direct
+        ? (addRowToOpen ? 'Add to the open Direct Expense Invoice' : inv ? 'Edit Direct Expense Invoice' : 'New Direct Expense Invoice')
+        : addRowToOpen ? 'Add to your open Reimbursement Invoice'
         : (inv ? 'Edit ' : 'New ') + kindLabel(editing.kind) + ' Invoice';
       $('invNumber').value = editing.number;
       $('invDateBox').classList.toggle('hidden', reimb);
@@ -643,20 +645,59 @@
 
     const personLabel = (u) => `${u.name || u.email} (${u.email})`;
 
-    // Admin: switch between raising for an employee and a direct expense.
-    function setRaiseFor(mode) {
-      if (mode === 'direct') {
-        const open = state.invoices.find((i) => i.direct && i.kind === 'reimbursement' && isOpen(i));
-        editing = { kind: 'reimbursement', direct: true, userId: state.me.id, number: 'Numbered when approved' };
-        lineItems = [{ particulars: '', amount: '' }];
-        $('invPersonBox').classList.add('hidden');
-        $('invoiceTitle').innerText = open ? 'Add to the open Direct Expense Invoice' : 'New Direct Expense Invoice';
-        $('invNumber').value = editing.number;
-        renderInvoiceItems();
-      } else {
-        $('invPersonBox').classList.remove('hidden');
-        pickPerson($('invPerson').value);
+    // EMPLOYEE DROPDOWN (type to filter)
+    let peopleShown = [], peopleActive = -1;
+    function openPeople(all) {
+      const q = all ? '' : $('invPerson').value.trim().toLowerCase();
+      peopleShown = state.users.filter((u) => u.active && (!q || `${u.name || ''} ${u.email}`.toLowerCase().includes(q)));
+      peopleActive = peopleShown.length ? 0 : -1;
+      renderPeople();
+    }
+    function renderPeople() {
+      const list = $('invPeople');
+      list.innerHTML = peopleShown.length
+        ? peopleShown.map((u, i) => `<li id="person-${u.id}" role="option" aria-selected="${i === peopleActive}"
+            class="px-3 py-2 text-sm cursor-pointer ${i === peopleActive ? 'bg-blue-50 text-blue-700' : 'text-slate-200 hover:bg-slate-800'}"
+            onmousedown="event.preventDefault(); choosePerson(${u.id})">${esc(u.name || u.email)}<span class="block text-xs text-slate-400">${esc(u.email)}${u.id === state.me.id ? ' · you' : ''}</span></li>`).join('')
+        : '<li class="px-3 py-2 text-sm text-slate-400">No matching employee</li>';
+      list.classList.remove('hidden');
+      $('invPerson').setAttribute('aria-expanded', 'true');
+      $('invPerson').setAttribute('aria-activedescendant', peopleActive >= 0 ? `person-${peopleShown[peopleActive].id}` : '');
+      const on = list.querySelector('[aria-selected="true"]');
+      if (on) on.scrollIntoView({ block: 'nearest' });
+    }
+    function closePeople() {
+      $('invPeople').classList.add('hidden');
+      $('invPerson').setAttribute('aria-expanded', 'false');
+      // typed text that isn't a pick goes back to the chosen employee
+      const chosen = state.users.find((u) => u.id === editing.userId);
+      if (chosen && !editing.direct) $('invPerson').value = personLabel(chosen);
+    }
+    function togglePeople() {
+      if ($('invPeople').classList.contains('hidden')) { $('invPerson').focus(); openPeople(true); } else closePeople();
+    }
+    function peopleKey(e) {
+      const open = !$('invPeople').classList.contains('hidden');
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!open) return openPeople(true);
+        if (!peopleShown.length) return;
+        peopleActive = (peopleActive + (e.key === 'ArrowDown' ? 1 : -1) + peopleShown.length) % peopleShown.length;
+        renderPeople();
+      } else if (e.key === 'Enter') {
+        e.preventDefault(); // don't submit the form
+        if (open && peopleActive >= 0) choosePerson(peopleShown[peopleActive].id);
+      } else if (e.key === 'Escape' && open) {
+        e.preventDefault(); e.stopPropagation();
+        closePeople();
       }
+    }
+    function choosePerson(id) {
+      const u = state.users.find((x) => x.id === id);
+      $('invPerson').value = personLabel(u);
+      $('invPeople').classList.add('hidden');
+      $('invPerson').setAttribute('aria-expanded', 'false');
+      pickPerson(personLabel(u));
     }
 
     // Admin picked an employee: their own bundle opens as usual; for someone else the new rows are added to theirs.
@@ -715,7 +756,7 @@
         return;
       }
       const total = sumItems(lineItems);
-      box.innerHTML = `<div class="overflow-x-auto"><table class="w-full"><tr><th class="th w-8">#</th><th class="th w-24">Date</th>${editing.direct ? '<th class="th w-48">Direct expense</th>' : ''}<th class="th">Reimbursement particulars</th><th class="th w-36">Amount (Rs.)</th><th class="th w-40">Category (optional)</th><th class="th">Bill (PDF)</th><th class="th w-8"></th></tr>
+      box.innerHTML = `<div class="overflow-x-auto"><table class="w-full"><tr><th class="th w-8">#</th><th class="th w-24">Date</th>${editing.direct ? '<th class="th w-48">Direct expense</th>' : ''}<th class="th">${editing.direct ? 'Direct Expense Particulars' : 'Reimbursement particulars'}</th><th class="th w-36">Amount (Rs.)</th><th class="th w-40">Category (optional)</th><th class="th">Bill (PDF)</th><th class="th w-8"></th></tr>
         ${lineItems.map((it, n) => `<tr><td class="td text-slate-400">${n + 1}</td><td class="td text-xs text-slate-400">${it.date ? showDate(it.date) : 'Today'}</td>
           ${editing.direct ? `<td class="td"><select class="inp" required aria-label="Direct expense, row ${n + 1}" onchange="pickExpense(${n}, this.value)"><option value="">Choose…</option>${(state.expenses || []).map((x) => `<option value="${esc(x.id)}" ${x.id === it.expenseId ? 'selected' : ''}>${esc(x.title)} · ${rs(x.amount)}</option>`).join('')}</select></td>` : ''}
           <td class="td"><input class="inp" required maxlength="300" aria-label="Particulars, row ${n + 1}" value="${esc(it.particulars)}" oninput="lineItems[${n}].particulars=this.value"></td>
@@ -747,7 +788,7 @@
         if (lineItems.some((it) => !it.bill || it.bill.busy)) return toast('Attach a bill (PDF upload or Drive link) to every row', 'error');
         body.items = lineItems.map((it) => ({ date: it.date, particulars: it.particulars, amount: Number(it.amount), bill: it.bill, categoryId: it.categoryId || '', expenseId: it.expenseId }));
       }
-      if (await post(body, editing.kind === 'reimbursement' ? 'Saved on your reimbursement invoice, waiting for approval' : 'Invoice submitted for approval')) closeModal('invoiceModal');
+      if (await post(body, editing.direct ? 'Saved on the Direct Expense invoice, waiting for approval' : editing.kind === 'reimbursement' ? 'Saved on the reimbursement invoice, waiting for approval' : 'Invoice submitted for approval')) closeModal('invoiceModal');
     }
 
     const catName = (id) => (id && (state.categories.find((c) => c.id === id) || {}).name) || '';
