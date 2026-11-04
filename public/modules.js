@@ -1,11 +1,12 @@
 // Module switcher in every page header: only the modules this person may open.
-// renderModules(navElement, { role, ptLinked, current: 'tracker' | 'payouts' | 'projects' })
+// renderModules(navElement, { role, ptLinked, current: 'tracker' | 'payouts' | 'projects' | 'receivables' })
 function renderModules(el, { role, ptLinked, current }) {
   const staff = role === 'admin' || role === 'management';
   const mods = [
     { key: 'tracker', label: 'Expense Tracker', href: '/', icon: 'fa-chart-pie', show: staff },
     { key: 'payouts', label: 'Invoicing', href: '/payouts.html', icon: 'fa-file-invoice', show: true },
     { key: 'projects', label: 'Project Tracker', href: '/projects.html', icon: 'fa-diagram-project', show: staff || ptLinked },
+    { key: 'receivables', label: 'Receivables', href: '/receivables.html', icon: 'fa-hand-holding-dollar', show: staff },
   ].filter((m) => m.show);
   el.setAttribute('aria-label', 'Modules');
   el.innerHTML = mods.length < 2 ? '' : mods.map((m) => {

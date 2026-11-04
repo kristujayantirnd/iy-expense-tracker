@@ -227,6 +227,27 @@
         <button id="clearBillsBtn" onclick="clearOldBills()" class="px-3 py-2 rounded-lg text-xs font-semibold bg-[#cc0000] hover:bg-[#a30000] text-white disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-1.5"><i class="fa-solid fa-trash"></i>Delete uploaded bills older than 3 months</button>
       </div>
       <div class="card p-4 space-y-3">
+        <h2 class="text-lg font-semibold text-slate-100">Receivables (Google Sheet)</h2>
+        <p class="text-xs text-slate-400">The Receivables module reads your invoice &amp; receivables sheet through its Apps Script. The sheet stays the place where data is kept and edited.</p>
+        <form onsubmit="saveReceivables(event)" class="grid gap-3">
+          <div><label class="lbl" for="r-script">Apps Script web app link</label><input id="r-script" class="inp" placeholder="https://script.google.com/macros/s/…/exec"></div>
+          <div><button class="btn-primary"><i class="fa-solid fa-floppy-disk"></i>Save Receivables link</button></div>
+        </form>
+        <details class="text-xs text-slate-300">
+          <summary class="cursor-pointer font-semibold">One-time setup in your Apps Script (about 3 minutes)</summary>
+          <ol class="list-decimal ml-5 mt-2 space-y-1">
+            <li>Open the Receivables Apps Script project.</li>
+            <li>Replace its <code>doGet()</code> function with the code below (it keeps the dashboard page and adds a data link that needs this app's key).</li>
+            <li>Save, then <b>Deploy → Manage deployments</b> → pencil icon → Version <b>New version</b>; Execute as <b>Me</b>, Who has access <b>Anyone</b> → Deploy. (Or <b>New deployment</b> → Web app with those settings.)</li>
+            <li>Copy the <b>Web app URL</b> (ends in <code>/exec</code>) into the field above and save.</li>
+          </ol>
+          <div class="flex gap-2 mt-2 items-start">
+            <textarea id="receivablesCode" readonly rows="9" class="inp font-mono text-[11px]" aria-label="Apps Script code for Receivables"></textarea>
+            <button type="button" onclick="copyText('receivablesCode')" class="btn"><i class="fa-solid fa-copy"></i>Copy</button>
+          </div>
+        </details>
+      </div>
+      <div class="card p-4 space-y-3">
         <h2 class="text-lg font-semibold text-slate-100">Project Tracker owners</h2>
         <p class="text-xs text-slate-400">Link each Project Tracker owner to a login here. Linked people open the Project Tracker from the header button and see their own projects and stages. Admin and Management always get the full Project Tracker.</p>
         <div class="overflow-x-auto"><table class="w-full" id="ptOwnersTable"></table></div>
@@ -479,7 +500,7 @@
       $('settingsBtn').classList.toggle('!text-blue-700', tab === 'employer');
       $('settingsBtn').classList.toggle('bg-blue-50', tab === 'employer');
       if (tab === 'register') loadRegister();
-      if (tab === 'employer') { loadStorage(); loadPtOwners(); }
+      if (tab === 'employer') { loadStorage(); loadPtOwners(); loadReceivablesConfig(); }
     }
 
     // INVOICES
@@ -787,6 +808,47 @@
       return `<div class="flex gap-1">
         <label class="btn cursor-pointer" title="Upload PDF (max 2 MB)"><i class="fa-solid fa-upload"></i>PDF<input type="file" accept="application/pdf" class="sr-only" aria-label="Upload bill PDF, row ${n + 1}" onchange="uploadBill(${n}, this)"></label>
         <button type="button" class="btn" onclick="linkBill(${n})" title="Google Drive link" aria-label="Google Drive link, row ${n + 1}"><i class="fa-brands fa-google-drive"></i>Drive</button></div>`;
+    }
+
+    // RECEIVABLES (Settings): Apps Script link + the doGet() code with this app's key
+    const RECEIVABLES_CODE = `// Invincible YOU: replaces doGet(). Keeps the dashboard page and adds a key-protected data link.
+const RECEIVABLES_KEY = '__KEY__';
+
+function doGet(e) {
+  if (e && e.parameter && e.parameter.format === 'json') {
+    const out = (o) => ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);
+    if (e.parameter.key !== RECEIVABLES_KEY) return out({ error: 'Wrong key: copy the code again from Settings (gear icon)' });
+    try {
+      return out(getDashboardData());
+    } catch (err) {
+      return out({ error: String(err.message || err) });
+    }
+  }
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('Invoice & Payment Dashboard')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}`;
+
+    async function loadReceivablesConfig() {
+      try {
+        const res = await fetch('/api/receivables?config=1');
+        const c = await res.json();
+        if (!res.ok) throw new Error(c.error || 'Could not load');
+        $('r-script').value = c.script;
+        $('receivablesCode').value = RECEIVABLES_CODE.replace('__KEY__', c.key);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function saveReceivables(e) {
+      e.preventDefault();
+      try {
+        const res = await fetch('/api/receivables', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ script: $('r-script').value }) });
+        const c = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(c.error || 'Could not save');
+        toast('Receivables link saved', 'success');
+      } catch (err) { toast(err.message, 'error'); }
     }
 
     // PROJECT TRACKER OWNER LINKS (Settings)
@@ -1105,7 +1167,9 @@ function doPost(e) {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { $('loginError').innerText = data.error || 'Sign in failed'; return; }
         // Came from the Project Tracker (its "Sign in with Invincible YOU", or the Projects page): open it here.
-        if (['project-tracker', 'projects'].includes(new URLSearchParams(location.search).get('next'))) { location.href = '/projects.html'; return; }
+        const next = new URLSearchParams(location.search).get('next');
+        if (['project-tracker', 'projects'].includes(next)) { location.href = '/projects.html'; return; }
+        if (next === 'receivables' && data.role !== 'employee') { location.href = '/receivables.html'; return; }
         if (data.role === 'management') { location.href = '/'; return; } // Management's home is the Expense Tracker
         if (data.role === 'employee' && data.ptLinked) { location.href = '/projects.html'; return; } // linked employees start in the Project Tracker
       } catch {

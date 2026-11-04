@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invincible YOU · Receivables</title>
+  <link rel="icon" href="/iy-lockup.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind only styles the Invincible YOU header here; the dashboard below is Bootstrap.
+    // preflight/container/visibility off so Tailwind can't override Bootstrap (e.g. .collapse, .container).
+    tailwind.config = {
+      corePlugins: { preflight: false, container: false, visibility: false },
+      theme: {
+        extend: {
+          colors: {
+            slate: { 100: '#1a1a1a', 200: '#1a1a1a', 300: '#364153', 400: '#484848', 500: '#6a7282', 600: '#8a8a8a', 700: '#e5e7eb', 800: '#f3f4f6', 900: '#ffffff', 950: '#fafafa' },
+            blue: { 50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087', 500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a' },
+          }
+        }
+      }
+    }
+  </script>
+  <script src="/modules.js"></script>
+  <style>
+    :root {
+      --primary-accent: #6366f1;
+      --primary-accent-bg: #eef2ff;
+      --success-accent: #10b981;
+      --pending-accent: #f59e0b;
+      --upcoming-accent: #0ea5e9;
+      --card-border: #e2e8f0;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+    }
+    body {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-main);
+      min-height: 100vh;
+    }
+    /* Invincible YOU header (same as the other modules) */
+    .iy-header { background: rgba(255,255,255,.9); border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 1000; font-family: 'Source Sans 3', Arial, sans-serif; }
+    .iy-header h1 { font-family: Literata, Georgia, serif; font-size: 1rem; font-weight: 600; margin: 0; color: #1a1a1a; }
+    .iy-header a { text-decoration: none; }
+    .iy-icon-btn { padding: .5rem; border-radius: .5rem; color: #484848; background: none; border: 0; }
+    .iy-icon-btn:hover { background: #f3f4f6; color: #1a1a1a; }
+
+    .metric-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; padding: 1.1rem 1.25rem; box-shadow: 0 4px 15px -2px rgba(0,0,0,.03); transition: all .25s cubic-bezier(.4,0,.2,1); position: relative; overflow: hidden; }
+    .metric-card:hover { transform: translateY(-3px); box-shadow: 0 12px 25px -5px rgba(0,0,0,.06); }
+    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+    .card-total::before { background: var(--primary-accent); }
+    .card-received::before { background: var(--success-accent); }
+    .card-pending::before { background: var(--pending-accent); }
+    .card-upcoming::before { background: var(--upcoming-accent); }
+    .metric-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+    .metric-value { font-size: 1.45rem; font-weight: 700; letter-spacing: -.02em; margin-top: .2rem; }
+
+    .filter-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.02); }
+    .form-control, .form-select { border-radius: 10px; border: 1px solid #cbd5e1; font-size: .875rem; padding: .5rem .75rem; transition: all .2s ease; }
+    .form-control:focus { border-color: var(--primary-accent); box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+
+    .category-toggle-group { background: #f1f5f9; border-radius: 12px; padding: 4px; display: inline-flex; }
+    .category-toggle-item { padding: 6px 14px; border-radius: 8px; font-size: .825rem; font-weight: 600; cursor: pointer; user-select: none; transition: all .2s ease; }
+    .category-toggle-item:has(input:checked) { background: #fff; color: var(--text-main); box-shadow: 0 2px 6px rgba(0,0,0,.06); }
+    .category-toggle-item:has(input:focus-visible) { outline: 2px solid var(--primary-accent); }
+
+    .nav-pills-modern .nav-link { color: var(--text-muted); font-weight: 600; font-size: .9rem; border-radius: 12px; padding: .6rem 1.2rem; transition: all .2s ease; }
+    .nav-pills-modern .nav-link:hover { background: rgba(255,255,255,.6); color: var(--text-main); }
+    .nav-pills-modern .nav-link.active { background: #fff; color: var(--primary-accent); box-shadow: 0 4px 12px rgba(0,0,0,.05); border: 1px solid var(--card-border); }
+
+    .accordion-item { border: 1px solid var(--card-border) !important; border-radius: 14px !important; overflow: hidden; margin-bottom: .85rem; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.015); }
+    .month-header-btn { background: #fff !important; padding: 1rem 1.25rem; }
+    .month-header-btn:not(.collapsed) { background: #f8fafc !important; box-shadow: none !important; }
+    .client-header-btn { background: #f8fafc !important; padding: .75rem 1rem; }
+    .dashboard-table { table-layout: fixed; width: 100%; }
+    .dashboard-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--card-border); }
+    .dashboard-table td { font-size: .875rem; vertical-align: middle; white-space: nowrap; }
+    .col-inv { width: 18%; } .col-date { width: 15%; } .col-due { width: 22%; }
+    .col-amt { width: 20%; text-align: right; } .col-status { width: 13%; text-align: center; } .col-action { width: 12%; text-align: center; }
+
+    .badge-soft { padding: .35em .7em; font-weight: 600; border-radius: 8px; font-size: .75rem; }
+    .badge-soft-pending { background: #fef3c7; color: #92400e; }
+    .badge-soft-received { background: #d1fae5; color: #065f46; }
+    .badge-soft-upcoming { background: #e0f2fe; color: #0369a1; }
+    .badge-soft-overdue { background: #fee2e2; color: #991b1b; }
+
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,.85); backdrop-filter: blur(8px); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+    .pdf-option-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; padding: 1rem 1.25rem; }
+    .pdf-check-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: .85rem; font-weight: 600; cursor: pointer; user-select: none; background: #fff; margin: 0 6px 6px 0; }
+    .pdf-check-chip:has(input:checked) { border-color: var(--primary-accent); background: var(--primary-accent-bg); color: var(--primary-accent); }
+    .pdf-preview-wrap { background: #e2e8f0; border-radius: 16px; padding: 16px 8px; overflow-x: auto; }
+    #pdfSheet { width: 360px; margin: 0 auto; background: #fff; color: #1e293b; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; padding: 14px 18px 14px 14px; box-sizing: border-box; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+    #pdfSheet *, #pdfSheet *::before, #pdfSheet *::after { box-sizing: border-box; }
+    #pdfSheet .p-amt, #pdfSheet .p-row-top > span:last-child, #pdfSheet .p-client > span:last-child, #pdfSheet .p-month > span:last-child, #pdfSheet .p-grand > span:last-child, #pdfSheet .p-row-bot > span:last-child { white-space: nowrap; flex-shrink: 0; text-align: right; }
+    #pdfSheet .p-row-top, #pdfSheet .p-row-bot, #pdfSheet .p-client, #pdfSheet .p-month, #pdfSheet .p-grand { gap: 8px; }
+    #pdfSheet .p-title { font-size: 16px; font-weight: 700; margin: 0; }
+    #pdfSheet .p-sub { font-size: 10.5px; color: #64748b; margin: 2px 0 0; }
+    #pdfSheet .p-head { border-bottom: 2px solid #6366f1; padding-bottom: 8px; margin-bottom: 10px; }
+    #pdfSheet .p-month { background: #eef2ff; color: #3730a3; font-weight: 700; font-size: 12px; padding: 6px 8px; border-radius: 6px; margin: 12px 0 6px; display: flex; justify-content: space-between; }
+    #pdfSheet .p-client { font-weight: 700; font-size: 12px; padding: 5px 2px 4px; border-bottom: 1px solid #cbd5e1; margin-top: 8px; display: flex; justify-content: space-between; gap: 8px; }
+    #pdfSheet .p-client span:first-child { flex: 1; word-break: break-word; }
+    #pdfSheet .p-row { padding: 5px 2px; border-bottom: 1px dashed #e2e8f0; }
+    #pdfSheet .p-row-top { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+    #pdfSheet .p-row-bot { display: flex; justify-content: space-between; font-size: 10.5px; color: #475569; margin-top: 2px; }
+    #pdfSheet .p-amt { font-weight: 700; color: #0f172a; }
+    #pdfSheet .p-chip { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-left: 4px; }
+    #pdfSheet .c-pending { background: #fef3c7; color: #92400e; }
+    #pdfSheet .c-upcoming { background: #e0f2fe; color: #0369a1; }
+    #pdfSheet .c-received { background: #d1fae5; color: #065f46; }
+    #pdfSheet .p-overdue { color: #b91c1c; font-weight: 700; }
+    #pdfSheet .p-grand { margin-top: 14px; padding: 8px; background: #1e293b; color: #fff; border-radius: 8px; display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+    #pdfSheet .p-empty { text-align: center; color: #64748b; font-size: 12px; padding: 30px 0; }
+  </style>
+</head>
+<body>
+
+  <div id="loading" class="loading-overlay">
+    <div class="spinner-border text-primary" style="width: 2.5rem; height: 2.5rem;" role="status"></div>
+    <p class="mt-3 text-secondary fw-semibold fs-6">Loading receivables…</p>
+  </div>
+
+  <!-- Invincible YOU header with the module switcher (replaces the Apps Script banner) -->
+  <header class="iy-header mb-4">
+    <div class="d-flex align-items-center justify-content-between gap-3 px-3" style="height: 56px;">
+      <div class="d-flex align-items-center gap-3 min-w-0">
+        <img src="/iy-lockup.png" alt="Invincible YOU" style="height: 32px; width: auto;">
+        <h1 class="d-none d-sm-block border-start ps-3">Receivables</h1>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 rounded-lg p-1"></nav>
+        <span id="currentUser" class="d-none d-sm-inline small text-muted"></span>
+        <button class="iy-icon-btn" onclick="logout()" title="Sign out" aria-label="Sign out"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <div class="container pb-5">
+    <div id="loadError" class="alert alert-danger d-none" role="alert"></div>
+
+    <!-- Filters: due dates, client, Service / Reimbursement toggles, refresh -->
+    <div class="filter-card p-3 mb-4">
+      <div class="row g-2 align-items-end">
+        <div class="col-6 col-md-2">
+          <label for="fromDate" class="form-label text-muted fw-semibold small mb-1">From Due Date</label>
+          <input type="date" id="fromDate" class="form-control">
+        </div>
+        <div class="col-6 col-md-2">
+          <label for="toDate" class="form-label text-muted fw-semibold small mb-1">To Due Date</label>
+          <input type="date" id="toDate" class="form-control">
+        </div>
+        <div class="col-md">
+          <label for="searchClient" class="form-label text-muted fw-semibold small mb-1">Client Search</label>
+          <div class="input-group">
+            <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+            <input type="text" id="searchClient" class="form-control border-start-0 ps-0" placeholder="Type client name...">
+          </div>
+        </div>
+        <div class="col-md-auto">
+          <span class="form-label text-muted fw-semibold small mb-1 d-block">Invoice type</span>
+          <div class="category-toggle-group shadow-sm">
+            <label class="category-toggle-item mb-0">
+              <input type="checkbox" id="chkService" class="visually-hidden" checked onchange="applyFilters()">
+              <i class="fa-solid fa-briefcase me-1 text-primary"></i> Service
+            </label>
+            <label class="category-toggle-item mb-0">
+              <input type="checkbox" id="chkReimbursement" class="visually-hidden" onchange="applyFilters()">
+              <i class="fa-solid fa-receipt me-1 text-success"></i> Reimbursement
+            </label>
+          </div>
+        </div>
+        <div class="col-md-auto d-flex gap-2">
+          <button class="btn btn-primary fw-semibold px-3" style="border-radius: 10px;" onclick="applyFilters()">Filter</button>
+          <button class="btn btn-light border fw-semibold px-3" style="border-radius: 10px;" onclick="clearFilters()">Reset</button>
+          <button class="btn btn-light border rounded-circle p-2 d-flex align-items-center justify-content-center flex-shrink-0" style="width: 38px; height: 38px;" onclick="loadData()" title="Refresh sheet data" aria-label="Refresh sheet data">
+            <i class="fa-solid fa-rotate-right text-secondary"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+      <div class="col-6 col-md-3"><div class="metric-card card-total"><div class="metric-title">Total Revenue</div><div class="metric-value text-dark" id="metricTotal">₹0.00</div><small class="text-muted"><span id="countTotal">0</span> Invoices</small></div></div>
+      <div class="col-6 col-md-3"><div class="metric-card card-received"><div class="metric-title text-success">Total Received</div><div class="metric-value text-success" id="metricReceived">₹0.00</div><small class="text-muted"><span id="countReceived">0</span> Settled</small></div></div>
+      <div class="col-6 col-md-3"><div class="metric-card card-pending"><div class="metric-title" style="color: #b45309;">Receivables</div><div class="metric-value" style="color: #b45309;" id="metricPending">₹0.00</div><small class="text-muted"><span id="countPending">0</span> Pending</small></div></div>
+      <div class="col-6 col-md-3"><div class="metric-card card-upcoming"><div class="metric-title text-info">Upcoming (excl. GST)</div><div class="metric-value text-info" id="metricUpcoming">₹0.00</div><small class="text-muted"><span id="countUpcoming">0</span> Upcoming</small></div></div>
+    </div>
+
+    <ul class="nav nav-pills nav-pills-modern mb-3 gap-2" id="dashboardTabs" role="tablist">
+      <li class="nav-item"><button class="nav-link active" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending-sec" type="button"><i class="fa-solid fa-clock me-1 text-warning"></i> Receivables (<span id="tabCountPending">0</span>)</button></li>
+      <li class="nav-item"><button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcoming-sec" type="button"><i class="fa-solid fa-calendar-plus me-1 text-info"></i> Upcoming Receivables (<span id="tabCountUpcoming">0</span>)</button></li>
+      <li class="nav-item"><button class="nav-link" id="received-tab" data-bs-toggle="tab" data-bs-target="#received-sec" type="button"><i class="fa-solid fa-circle-check me-1 text-success"></i> Payments Received (<span id="tabCountReceived">0</span>)</button></li>
+      <li class="nav-item"><button class="nav-link" id="pdf-tab" data-bs-toggle="tab" data-bs-target="#pdf-sec" type="button"><i class="fa-solid fa-file-pdf me-1 text-danger"></i> PDF Layout</button></li>
+    </ul>
+
+    <div class="tab-content" id="dashboardTabsContent">
+      <div class="tab-pane fade show active" id="pending-sec" role="tabpanel">
+        <div class="d-flex justify-content-end mb-3"><span class="fs-6 fw-semibold text-muted">Total Pending: <span id="secTotalPending" class="fw-bold" style="color: #b45309;">₹0.00</span></span></div>
+        <div class="accordion month-accordion" id="accordionPending"></div>
+      </div>
+      <div class="tab-pane fade" id="upcoming-sec" role="tabpanel">
+        <div class="d-flex justify-content-end mb-3"><span class="fs-6 fw-semibold text-muted">Total Upcoming (excl. GST): <span id="secTotalUpcoming" class="text-info fw-bold">₹0.00</span></span></div>
+        <div class="accordion month-accordion" id="accordionUpcoming"></div>
+      </div>
+      <div class="tab-pane fade" id="received-sec" role="tabpanel">
+        <div class="d-flex justify-content-end mb-3"><span class="fs-6 fw-semibold text-muted">Total Received: <span id="secTotalReceived" class="text-success fw-bold">₹0.00</span></span></div>
+        <div class="accordion month-accordion" id="accordionReceived"></div>
+      </div>
+      <div class="tab-pane fade" id="pdf-sec" role="tabpanel">
+        <div class="row g-3 mb-3">
+          <div class="col-md-5"><div class="pdf-option-card h-100">
+            <div class="fw-bold small text-muted text-uppercase mb-2" style="letter-spacing:.05em;">Include (multi-select)</div>
+            <label class="pdf-check-chip"><input type="checkbox" class="pdf-status" value="pending" checked onchange="renderPdfPreview()"> <i class="fa-solid fa-clock"></i> Receivables</label>
+            <label class="pdf-check-chip"><input type="checkbox" class="pdf-status" value="upcoming" onchange="renderPdfPreview()"> <i class="fa-solid fa-calendar-plus"></i> Upcoming Receivables</label>
+            <label class="pdf-check-chip"><input type="checkbox" class="pdf-status" value="received" onchange="renderPdfPreview()"> <i class="fa-solid fa-circle-check"></i> Payments Received</label>
+          </div></div>
+          <div class="col-md-4"><div class="pdf-option-card h-100">
+            <div class="fw-bold small text-muted text-uppercase mb-2" style="letter-spacing:.05em;">Layout Type</div>
+            <label class="pdf-check-chip"><input type="radio" name="pdfLayout" value="month" checked onchange="renderPdfPreview()"> <i class="fa-solid fa-calendar-days"></i> Month wise</label>
+            <label class="pdf-check-chip"><input type="radio" name="pdfLayout" value="client" onchange="renderPdfPreview()"> <i class="fa-solid fa-building"></i> Client wise</label>
+          </div></div>
+          <div class="col-md-3"><div class="pdf-option-card h-100 d-flex flex-column gap-2 justify-content-center">
+            <button class="btn btn-danger fw-semibold" style="border-radius:10px;" onclick="downloadPdf()" id="btnDownloadPdf"><i class="fa-solid fa-download me-1"></i> Download PDF</button>
+            <button class="btn btn-light border fw-semibold" style="border-radius:10px;" onclick="printPdf()"><i class="fa-solid fa-print me-1"></i> Print</button>
+          </div></div>
+        </div>
+        <div class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i> The PDF respects the Service/Reimbursement toggle, due-date range and client search above.</div>
+        <div class="pdf-preview-wrap"><div id="pdfSheet"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    let rawInvoices = [];
+    let currentFiltered = [];
+
+    window.onload = function () {
+      start();
+    };
+
+    // Signed-in check + module switcher, then the sheet data (Admin and Management only).
+    async function start() {
+      const res = await fetch('/api/payouts');
+      if (res.status === 401) { location.href = '/payouts.html?next=receivables'; return; }
+      const state = await res.json().catch(() => null);
+      if (!state || !state.me) { showError('Something went wrong, please try again.'); return; }
+      document.getElementById('currentUser').innerText = state.me.email;
+      renderModules(document.getElementById('moduleNav'), { role: state.me.role, ptLinked: state.me.ptLinked, current: 'receivables' });
+      if (state.me.role === 'employee') { showError('Receivables is only for Admin and Management.'); return; }
+      loadData();
+    }
+
+    async function loadData() {
+      document.getElementById('loading').style.display = 'flex';
+      document.getElementById('loadError').classList.add('d-none');
+      try {
+        const res = await fetch('/api/receivables', { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not load the receivables');
+        rawInvoices = data.invoices || [];
+        applyFilters();
+      } catch (err) {
+        showError(err.message);
+      }
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    function showError(msg) {
+      document.getElementById('loading').style.display = 'none';
+      const el = document.getElementById('loadError');
+      el.innerText = msg;
+      el.classList.remove('d-none');
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+      location.href = '/payouts.html';
+    }
+
+    function formatINR(val) {
+      return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val);
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // Only web links from the sheet become PDF buttons.
+    const safeLink = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '');
+
+    function getOverdueDays(dueDateIso) {
+      if (!dueDateIso) return 0;
+      const due = new Date(dueDateIso);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.ceil((today - due) / (1000 * 60 * 60 * 24));
+      return diffDays > 0 ? diffDays : 0;
+    }
+
+    function getMonthYearLabel(dueDateIso) {
+      if (!dueDateIso) return { label: 'Unspecified Due Date', key: '9999-99' };
+      const d = new Date(dueDateIso);
+      const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+      return { label: `${monthNames[d.getMonth()]} ${d.getFullYear()}`, key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` };
+    }
+
+    function applyFilters() {
+      const fromDate = document.getElementById('fromDate').value;
+      const toDate = document.getElementById('toDate').value;
+      const searchClient = document.getElementById('searchClient').value.toLowerCase().trim();
+      const showService = document.getElementById('chkService').checked;
+      const showReimbursement = document.getElementById('chkReimbursement').checked;
+
+      const filtered = rawInvoices.filter((inv) => {
+        let matchesCategory = false;
+        if (showService && inv.invoiceCategory === 'service') matchesCategory = true;
+        if (showReimbursement && inv.invoiceCategory === 'reimbursement') matchesCategory = true;
+        if (showService && showReimbursement && inv.invoiceCategory === 'other') matchesCategory = true;
+        if (!matchesCategory) return false;
+        if (fromDate && inv.dueDateIso && inv.dueDateIso < fromDate) return false;
+        if (toDate && inv.dueDateIso && inv.dueDateIso > toDate) return false;
+        if (searchClient && !String(inv.client || '').toLowerCase().includes(searchClient)) return false;
+        return true;
+      });
+
+      currentFiltered = filtered;
+      renderDashboard(filtered);
+      renderPdfPreview();
+    }
+
+    function clearFilters() {
+      document.getElementById('fromDate').value = '';
+      document.getElementById('toDate').value = '';
+      document.getElementById('searchClient').value = '';
+      document.getElementById('chkService').checked = true;
+      document.getElementById('chkReimbursement').checked = false;
+      applyFilters();
+    }
+
+    function renderDashboard(invoices) {
+      let totalReceivable = 0, totalReceived = 0, totalPending = 0, totalUpcoming = 0;
+      let countReceived = 0, countPending = 0, countUpcoming = 0;
+      const receivedInvoices = [], pendingInvoices = [], upcomingInvoices = [];
+
+      invoices.forEach((inv) => {
+        totalReceivable += inv.amtReceivable;
+        if (inv.isUpcoming) { totalUpcoming += inv.amtReceivable; countUpcoming++; upcomingInvoices.push(inv); }
+        else if (inv.isReceived) { totalReceived += inv.amtReceivable; countReceived++; receivedInvoices.push(inv); }
+        else { totalPending += inv.amtReceivable; countPending++; pendingInvoices.push(inv); }
+      });
+
+      const set = (id, v) => (document.getElementById(id).innerText = v);
+      set('metricTotal', formatINR(totalReceivable)); set('metricReceived', formatINR(totalReceived));
+      set('metricPending', formatINR(totalPending)); set('metricUpcoming', formatINR(totalUpcoming));
+      set('countTotal', invoices.length); set('countReceived', countReceived); set('countPending', countPending); set('countUpcoming', countUpcoming);
+      set('tabCountPending', countPending); set('tabCountUpcoming', countUpcoming); set('tabCountReceived', countReceived);
+      set('secTotalPending', formatINR(totalPending)); set('secTotalUpcoming', formatINR(totalUpcoming)); set('secTotalReceived', formatINR(totalReceived));
+
+      renderNestedMonthClientAccordion('accordionPending', pendingInvoices, 'pending');
+      renderNestedMonthClientAccordion('accordionUpcoming', upcomingInvoices, 'upcoming');
+      renderNestedMonthClientAccordion('accordionReceived', receivedInvoices, 'received');
+    }
+
+    function renderNestedMonthClientAccordion(containerId, list, type) {
+      const container = document.getElementById(containerId);
+      container.innerHTML = '';
+      if (list.length === 0) {
+        container.innerHTML = `<div class="text-center text-muted py-5 rounded-4 bg-white border"><i class="fa-solid fa-folder-open fs-2 mb-2 text-secondary"></i><br>No matching records found.</div>`;
+        return;
+      }
+
+      const monthGroups = {};
+      list.forEach((inv) => {
+        const m = getMonthYearLabel(inv.dueDateIso);
+        if (!monthGroups[m.key]) monthGroups[m.key] = { label: m.label, invoices: [] };
+        monthGroups[m.key].invoices.push(inv);
+      });
+
+      const colorClass = type === 'received' ? 'text-success' : type === 'upcoming' ? 'text-info' : 'text-warning';
+      const badgeClass = type === 'received' ? 'badge-soft-received' : type === 'upcoming' ? 'badge-soft-upcoming' : 'badge-soft-pending';
+      const amtHeaderTitle = type === 'upcoming' ? 'Amount (excl. GST)' : 'Amount Receivable';
+
+      let monthIndex = 0;
+      Object.keys(monthGroups).sort().forEach((mKey) => {
+        monthIndex++;
+        const monthData = monthGroups[mKey];
+        const monthTotal = monthData.invoices.reduce((sum, item) => sum + item.amtReceivable, 0);
+        const monthCollapseId = `${containerId}-month-${monthIndex}`;
+
+        const clientGroups = {};
+        monthData.invoices.forEach((inv) => { (clientGroups[inv.client] = clientGroups[inv.client] || []).push(inv); });
+
+        let clientIndex = 0;
+        let clientAccordionsHtml = '';
+        for (const [client, items] of Object.entries(clientGroups)) {
+          clientIndex++;
+          const clientTotal = items.reduce((sum, item) => sum + item.amtReceivable, 0);
+          const clientCollapseId = `${monthCollapseId}-client-${clientIndex}`;
+          const itemRowsHtml = items.map((inv) => {
+            const overdue = getOverdueDays(inv.dueDateIso);
+            const overdueBadge = type === 'pending' && overdue > 0
+              ? `<span class="badge badge-soft badge-soft-overdue ms-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>${overdue}d</span>` : '';
+            const link = safeLink(inv.pdfLink);
+            const pdfBtn = link
+              ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="btn btn-sm btn-light border py-0 px-2 rounded-2 text-primary"><i class="fa-solid fa-file-pdf me-1"></i>PDF</a>`
+              : `<span class="text-muted small">-</span>`;
+            return `
+              <tr>
+                <td class="col-inv fw-semibold text-dark">${esc(inv.invoiceNumber)}</td>
+                <td class="col-date">${esc(inv.invoiceDate)}</td>
+                <td class="col-due">${esc(inv.dueDate)} ${overdueBadge}</td>
+                <td class="col-amt fw-bold text-dark">${formatINR(inv.amtReceivable)}</td>
+                <td class="col-status"><span class="badge badge-soft ${badgeClass}">${esc(inv.rawStatus)}</span></td>
+                <td class="col-action">${pdfBtn}</td>
+              </tr>`;
+          }).join('');
+
+          clientAccordionsHtml += `
+            <div class="accordion-item my-2 border">
+              <h2 class="accordion-header">
+                <button class="accordion-button client-header-btn collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${clientCollapseId}">
+                  <div class="container-fluid p-0"><div class="row align-items-center g-0">
+                    <div class="col-7 col-md-8 fw-semibold text-dark pe-2"><i class="fa-solid fa-building text-secondary me-2"></i>${esc(client)}
+                      <span class="badge bg-secondary-subtle text-secondary rounded-pill ms-2 fw-normal">${items.length}</span></div>
+                    <div class="col-5 col-md-4 text-end fw-bold ${colorClass} pe-3">${formatINR(clientTotal)}</div>
+                  </div></div>
+                </button>
+              </h2>
+              <div id="${clientCollapseId}" class="accordion-collapse collapse" data-bs-parent="#${monthCollapseId}-clients-container">
+                <div class="accordion-body p-0"><div class="table-responsive">
+                  <table class="table table-hover align-middle mb-0 dashboard-table">
+                    <thead class="bg-light"><tr>
+                      <th class="col-inv">Invoice No</th><th class="col-date">Invoice Date</th><th class="col-due">Due Date</th>
+                      <th class="col-amt">${amtHeaderTitle}</th><th class="col-status">Status</th><th class="col-action">Action</th>
+                    </tr></thead>
+                    <tbody>${itemRowsHtml}</tbody>
+                  </table>
+                </div></div>
+              </div>
+            </div>`;
+        }
+
+        container.insertAdjacentHTML('beforeend', `
+          <div class="accordion-item shadow-sm">
+            <h2 class="accordion-header">
+              <button class="accordion-button month-header-btn collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#${monthCollapseId}">
+                <div class="container-fluid p-0"><div class="row align-items-center g-0">
+                  <div class="col-7 col-md-8 fw-bold fs-6 text-dark pe-2"><i class="fa-solid fa-calendar-days text-primary me-2"></i> ${esc(monthData.label)}
+                    <span class="badge bg-primary-subtle text-primary rounded-pill ms-2">${monthData.invoices.length} Invoices</span></div>
+                  <div class="col-5 col-md-4 text-end fw-bold fs-5 ${colorClass} pe-3">${formatINR(monthTotal)}</div>
+                </div></div>
+              </button>
+            </h2>
+            <div id="${monthCollapseId}" class="accordion-collapse collapse" data-bs-parent="#${containerId}">
+              <div class="accordion-body bg-light p-3">
+                <div class="accordion client-accordion" id="${monthCollapseId}-clients-container">${clientAccordionsHtml}</div>
+              </div>
+            </div>
+          </div>`);
+      });
+    }
+
+    /* ===================== PDF LAYOUT (unchanged from the Apps Script version) ===================== */
+    function invStatusKey(inv) {
+      if (inv.isUpcoming) return 'upcoming';
+      if (inv.isReceived) return 'received';
+      return 'pending';
+    }
+
+    const STATUS_LABEL = { pending: 'Receivable', upcoming: 'Upcoming', received: 'Received' };
+
+    function getPdfSelection() {
+      const statuses = Array.from(document.querySelectorAll('.pdf-status:checked')).map((c) => c.value);
+      const layoutEl = document.querySelector('input[name="pdfLayout"]:checked');
+      return { statuses, layout: layoutEl ? layoutEl.value : 'month' };
+    }
+
+    function pdfRowHtml(inv) {
+      const key = invStatusKey(inv);
+      const overdue = key === 'pending' ? getOverdueDays(inv.dueDateIso) : 0;
+      const overdueTxt = overdue > 0 ? ` <span class="p-overdue">(${overdue}d overdue)</span>` : '';
+      return `
+        <div class="p-row">
+          <div class="p-row-top">
+            <span>${esc(inv.invoiceNumber || '-')}<span class="p-chip c-${key}">${STATUS_LABEL[key]}</span></span>
+            <span class="p-amt">${formatINR(inv.amtReceivable)}</span>
+          </div>
+          <div class="p-row-bot">
+            <span>Inv: ${esc(inv.invoiceDate || '-')}</span>
+            <span>Due: ${esc(inv.dueDate || '-')}${overdueTxt}</span>
+          </div>
+        </div>`;
+    }
+
+    function pdfClientBlock(client, items) {
+      const total = items.reduce((s, i) => s + i.amtReceivable, 0);
+      const sorted = items.slice().sort((a, b) => (a.dueDateIso || '9999').localeCompare(b.dueDateIso || '9999'));
+      return `
+        <div class="p-group">
+          <div class="p-client"><span>${esc(client || 'Unknown Client')}</span><span>${formatINR(total)}</span></div>
+          ${sorted.map(pdfRowHtml).join('')}
+        </div>`;
+    }
+
+    function groupByClient(list) {
+      const g = {};
+      list.forEach((inv) => { (g[inv.client] = g[inv.client] || []).push(inv); });
+      return g;
+    }
+
+    function renderPdfPreview() {
+      const sheet = document.getElementById('pdfSheet');
+      if (!sheet) return;
+      const sel = getPdfSelection();
+      const list = currentFiltered.filter((inv) => sel.statuses.includes(invStatusKey(inv)));
+      const statusText = sel.statuses.length ? sel.statuses.map((s) => STATUS_LABEL[s]).join(' + ') : 'None selected';
+      const layoutText = sel.layout === 'month' ? 'Month wise' : 'Client wise';
+      const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+      let html = `
+        <div class="p-head">
+          <p class="p-title">Report of Receivables</p>
+          <p class="p-sub">${esc(statusText)} &middot; ${layoutText} &middot; ${today}</p>
+        </div>`;
+
+      if (list.length === 0) {
+        sheet.innerHTML = html + `<div class="p-empty">No invoices for the selected options.</div>`;
+        return;
+      }
+
+      if (sel.layout === 'client') {
+        const groups = groupByClient(list);
+        Object.keys(groups).sort((a, b) => a.localeCompare(b)).forEach((client) => { html += pdfClientBlock(client, groups[client]); });
+      } else {
+        const months = {};
+        list.forEach((inv) => {
+          const m = getMonthYearLabel(inv.dueDateIso);
+          if (!months[m.key]) months[m.key] = { label: m.label, items: [] };
+          months[m.key].items.push(inv);
+        });
+        Object.keys(months).sort().forEach((key) => {
+          const m = months[key];
+          const mTotal = m.items.reduce((s, i) => s + i.amtReceivable, 0);
+          html += `<div class="p-month"><span>${esc(m.label)} (${m.items.length})</span><span>${formatINR(mTotal)}</span></div>`;
+          const groups = groupByClient(m.items);
+          Object.keys(groups).sort((a, b) => a.localeCompare(b)).forEach((client) => { html += pdfClientBlock(client, groups[client]); });
+        });
+      }
+
+      const grand = list.reduce((s, i) => s + i.amtReceivable, 0);
+      html += `<div class="p-grand"><span>Grand Total (${list.length})</span><span>${formatINR(grand)}</span></div>`;
+      sheet.innerHTML = html;
+    }
+
+    function pdfMoney(v) {
+      return 'Rs. ' + new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v || 0);
+    }
+
+    // Draws the PDF directly (vector text) so nothing can be cropped at the edge.
+    function buildPdfDoc() {
+      const sel = getPdfSelection();
+      const list = currentFiltered.filter((inv) => sel.statuses.includes(invStatusKey(inv)));
+      const jsPDF = window.jspdf.jsPDF;
+      const doc = new jsPDF({ unit: 'mm', format: [100, 178], orientation: 'portrait' });
+
+      const PW = 100, PH = 178, M = 7;
+      const R = PW - M;
+      const CW = R - M;
+      let y = M;
+
+      const CHIP = {
+        pending: { bg: [254, 243, 199], fg: [146, 64, 14] },
+        upcoming: { bg: [224, 242, 254], fg: [3, 105, 161] },
+        received: { bg: [209, 250, 229], fg: [6, 95, 70] },
+      };
+
+      const need = (h) => { if (y + h > PH - M) { doc.addPage(); y = M; } };
+      const font = (style, size, c) => { doc.setFont('helvetica', style); doc.setFontSize(size); doc.setTextColor(c[0], c[1], c[2]); };
+
+      const statusText = sel.statuses.map((s) => STATUS_LABEL[s]).join(' + ');
+      const layoutText = sel.layout === 'month' ? 'Month wise' : 'Client wise';
+      const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+      font('bold', 13, [30, 41, 59]);
+      doc.text('Report of Receivables', M, y + 4);
+      y += 7;
+      font('normal', 7, [100, 116, 139]);
+      doc.splitTextToSize(statusText + '  |  ' + layoutText + '  |  ' + today, CW).forEach((line) => { doc.text(line, M, y + 2); y += 3.4; });
+      y += 1;
+      doc.setDrawColor(99, 102, 241);
+      doc.setLineWidth(0.5);
+      doc.line(M, y, R, y);
+      y += 3;
+
+      if (list.length === 0) {
+        font('normal', 9, [100, 116, 139]);
+        doc.text('No invoices for the selected options.', PW / 2, y + 15, { align: 'center' });
+        return { doc, sel };
+      }
+
+      const drawRow = (inv) => {
+        need(11);
+        const key = invStatusKey(inv);
+        const rowY = y;
+        font('bold', 8, [15, 23, 42]);
+        const num = String(inv.invoiceNumber || '-');
+        doc.text(num, M, rowY + 4);
+        const nw = doc.getTextWidth(num);
+        font('bold', 6, CHIP[key].fg);
+        const lab = STATUS_LABEL[key];
+        const lw = doc.getTextWidth(lab) + 3;
+        doc.setFillColor(CHIP[key].bg[0], CHIP[key].bg[1], CHIP[key].bg[2]);
+        doc.roundedRect(M + nw + 1.5, rowY + 1.5, lw, 3.5, 1, 1, 'F');
+        doc.text(lab, M + nw + 3, rowY + 3.9);
+        font('bold', 8, [15, 23, 42]);
+        doc.text(pdfMoney(inv.amtReceivable), R, rowY + 4, { align: 'right' });
+        const l2 = rowY + 8;
+        font('normal', 7, [71, 85, 105]);
+        doc.text('Inv: ' + (inv.invoiceDate || '-'), M, l2);
+        const od = key === 'pending' ? getOverdueDays(inv.dueDateIso) : 0;
+        let dueRight = R;
+        if (od > 0) {
+          const t = '(' + od + 'd overdue)';
+          font('bold', 6.5, [185, 28, 28]);
+          doc.text(t, R, l2, { align: 'right' });
+          dueRight = R - doc.getTextWidth(t) - 1.2;
+          font('normal', 7, [71, 85, 105]);
+        }
+        doc.text('Due: ' + (inv.dueDate || '-'), dueRight, l2, { align: 'right' });
+        y = rowY + 10;
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.setLineDashPattern([0.6, 0.6], 0);
+        doc.line(M, y, R, y);
+        doc.setLineDashPattern([], 0);
+        y += 0.8;
+      };
+
+      const drawClient = (client, items) => {
+        const total = items.reduce((s, i) => s + i.amtReceivable, 0);
+        const sorted = items.slice().sort((a, b) => (a.dueDateIso || '9999').localeCompare(b.dueDateIso || '9999'));
+        font('bold', 8.5, [30, 41, 59]);
+        const amtTxt = pdfMoney(total);
+        const amtW = doc.getTextWidth(amtTxt);
+        const nameLines = doc.splitTextToSize(client || 'Unknown Client', CW - amtW - 4);
+        const headH = nameLines.length * 4 + 2;
+        need(headH + 13);
+        y += 2;
+        font('bold', 8.5, [30, 41, 59]);
+        doc.text(nameLines, M, y + 3);
+        doc.text(amtTxt, R, y + 3, { align: 'right' });
+        y += headH;
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.25);
+        doc.line(M, y, R, y);
+        y += 1;
+        sorted.forEach(drawRow);
+      };
+
+      const drawMonth = (label, count, total) => {
+        need(6.5 + 22);
+        y += 2;
+        doc.setFillColor(238, 242, 255);
+        doc.roundedRect(M, y, CW, 6.5, 1.2, 1.2, 'F');
+        font('bold', 8.5, [55, 48, 163]);
+        doc.text(label + ' (' + count + ')', M + 2, y + 4.4);
+        doc.text(pdfMoney(total), R - 2, y + 4.4, { align: 'right' });
+        y += 6.5;
+      };
+
+      if (sel.layout === 'client') {
+        const groups = groupByClient(list);
+        Object.keys(groups).sort((a, b) => a.localeCompare(b)).forEach((c) => drawClient(c, groups[c]));
+      } else {
+        const months = {};
+        list.forEach((inv) => {
+          const m = getMonthYearLabel(inv.dueDateIso);
+          if (!months[m.key]) months[m.key] = { label: m.label, items: [] };
+          months[m.key].items.push(inv);
+        });
+        Object.keys(months).sort().forEach((key) => {
+          const m = months[key];
+          drawMonth(m.label, m.items.length, m.items.reduce((s, i) => s + i.amtReceivable, 0));
+          const groups = groupByClient(m.items);
+          Object.keys(groups).sort((a, b) => a.localeCompare(b)).forEach((c) => drawClient(c, groups[c]));
+        });
+      }
+
+      need(12);
+      y += 4;
+      doc.setFillColor(30, 41, 59);
+      doc.roundedRect(M, y, CW, 7.5, 1.5, 1.5, 'F');
+      font('bold', 8.5, [255, 255, 255]);
+      doc.text('Grand Total (' + list.length + ')', M + 2, y + 5);
+      doc.text(pdfMoney(list.reduce((s, i) => s + i.amtReceivable, 0)), R - 2, y + 5, { align: 'right' });
+
+      const n = doc.getNumberOfPages();
+      for (let i = 1; i <= n; i++) {
+        doc.setPage(i);
+        font('normal', 6, [148, 163, 184]);
+        doc.text(i + ' / ' + n, PW / 2, PH - 3, { align: 'center' });
+      }
+      return { doc, sel };
+    }
+
+    function downloadPdf() {
+      const sel = getPdfSelection();
+      if (sel.statuses.length === 0) { alert('Please select at least one of Receivables / Upcoming / Payments Received.'); return; }
+      try {
+        const built = buildPdfDoc();
+        built.doc.save('Invoices_' + sel.layout + '-wise_' + new Date().toISOString().slice(0, 10) + '.pdf');
+      } catch (err) {
+        alert('PDF generation failed: ' + (err && err.message ? err.message : err));
+      }
+    }
+
+    function printPdf() {
+      const sel = getPdfSelection();
+      if (sel.statuses.length === 0) { alert('Please select at least one of Receivables / Upcoming / Payments Received.'); return; }
+      try {
+        const w = window.open(buildPdfDoc().doc.output('bloburl'), '_blank');
+        if (!w) alert('Pop-up blocked. Please allow pop-ups or use Download PDF.');
+      } catch (err) {
+        alert('PDF generation failed: ' + (err && err.message ? err.message : err));
+      }
+    }
+  </script>
+</body>
+</html>
