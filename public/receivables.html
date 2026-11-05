@@ -432,6 +432,17 @@
     </div></div>
   </div>
 
+  <div class="modal fade" id="pdfModal" tabindex="-1" aria-labelledby="pdfTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content">
+      <div class="modal-header gap-2">
+        <h2 class="modal-title h5 text-truncate" id="pdfTitle">Invoice PDF</h2>
+        <a id="pdfOpen" class="btn btn-light border btn-sm ms-auto" target="_blank" rel="noopener"><i class="fa-solid fa-up-right-from-square"></i> Open in new tab</a>
+        <button type="button" class="btn-close ms-0" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-0"><iframe id="pdfFrame" title="Invoice PDF preview" style="width:100%;height:78vh;border:0;display:block" allow="autoplay"></iframe></div>
+    </div></div>
+  </div>
+
   <div id="iyToast" class="position-fixed bottom-0 end-0 m-3 alert d-none shadow" style="z-index:2000;max-width:28rem" role="status"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

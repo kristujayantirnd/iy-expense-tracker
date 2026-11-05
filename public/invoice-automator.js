@@ -57,6 +57,7 @@ async function startAutomator(admin) {
       <div class="form-text">Placeholders: ${t.vars.map((v) => `<code>{{${v}}}</code>`).join(' ')}</div>
     </div>`).join('');
   $id('manage-tab').addEventListener('shown.bs.tab', () => { if (!inv.rows.length) loadRows(); });
+  $id('pdfModal').addEventListener('hidden.bs.modal', () => { $id('pdfFrame').src = 'about:blank'; });
   const res = await fetch('/api/client-invoices');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || 'Could not load the automator settings', false);
@@ -99,7 +100,7 @@ function renderManage() {
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
         <td>${esc(r.dueDate)}</td>
-        <td>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener"><i class="fa-solid fa-file-pdf"></i> PDF</a>` : '<span class="text-muted">-</span>'}</td>
+        <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}</td>
         <td><span class="badge badge-soft ${isPaid(r) ? 'badge-soft-received' : 'badge-soft-pending'}">${esc(ROW_STATUS[r.status] || r.status || '-')}</span>
           ${isPaid(r) && r.receivedDate ? `<div class="text-muted" style="font-size:11px">${esc(r.receivedDate)}</div>` : ''}</td>
         <td class="text-end text-nowrap">
@@ -107,6 +108,17 @@ function renderManage() {
           ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${r.row})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
         </td></tr>`;
     }).join('') + '</tbody>';
+}
+
+// Shows the invoice PDF in a dialog. Drive files use Drive's embeddable viewer (the viewer must have access to the file).
+function previewPdf(rowNo) {
+  const r = inv.rows.find((x) => x.row === rowNo);
+  const link = safeLink(r.pdfUrl);
+  const id = (link.match(/\/d\/([-\w]{25,})/) || link.match(/[?&]id=([-\w]{25,})/) || [])[1];
+  $id('pdfTitle').innerText = `Invoice ${r.invoiceNumber || ''} · ${r.client}`;
+  $id('pdfFrame').src = id ? `https://drive.google.com/file/d/${id}/preview` : link;
+  $id('pdfOpen').href = link;
+  modal('pdfModal').show();
 }
 
 let editingRow = null;
