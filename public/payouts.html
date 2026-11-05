@@ -344,6 +344,8 @@
       <div><label class="lbl" for="u-role">Role</label>
         <select id="u-role" class="inp"><option value="employee">Employee</option><option value="management">Management</option><option value="admin">Admin</option></select>
       </div>
+      <label class="flex items-start gap-2 text-sm text-slate-200"><input id="u-ptAdmin" type="checkbox" class="mt-1">
+        <span>Project Tracker admin<span class="block text-xs text-slate-400">Extra role: full admin rights in the Project Tracker. Every other module still follows the Role above.</span></span></label>
       <div><label class="lbl" for="u-salary">Monthly salary (Rs.) — used on salary invoices and in the Expense Tracker (all roles)</label><input id="u-salary" type="number" min="0" step="0.01" class="inp" oninput="toggleRevision()"></div>
       <div id="u-revBox" class="hidden grid sm:grid-cols-2 gap-3 bg-blue-50 rounded-xl p-3">
         <p class="sm:col-span-2 text-xs text-slate-300"><b>Salary revision</b>: <span id="u-revChange"></span>. It is recorded in Salary History; salary invoices dated from this day use the new amount.</p>
@@ -1142,7 +1144,7 @@ function doPost(e) {
     function renderUsers() {
       if (!state || state.me.role !== 'admin') return;
       $('userTable').innerHTML = `<tr><th class="th">Name</th><th class="th">Email</th><th class="th">Role</th><th class="th text-right">Monthly Salary</th><th class="th">Status</th><th class="th"></th></tr>`
-        + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td capitalize">${u.role}</td>
+        + state.users.map((u) => `<tr><td class="td">${esc(u.name || '—')}</td><td class="td">${esc(u.email)}</td><td class="td"><span class="capitalize">${u.role}</span>${u.extraRoles.includes('pt_admin') ? ' <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 whitespace-nowrap">Project Tracker admin</span>' : ''}</td>
           <td class="td text-right">${earlierSalaries(u.id).length ? `<button class="text-slate-400 hover:text-blue-700 mr-1" onclick="showEarlierSalaries(${u.id})" title="Earlier salaries" aria-label="Earlier salaries for ${esc(u.name || u.email)}"><i class="fa-solid fa-circle-info"></i></button>` : ''}${rs(u.salary)}${u.nextSalary != null ? `<div class="text-xs text-blue-700">${rs(u.nextSalary)} from ${showDate(u.nextFrom)}</div>` : ''}</td>
           <td class="td"><span class="px-2 py-0.5 rounded-full text-xs font-semibold ${u.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-800 text-slate-400'}">${u.active ? 'Active' : 'Inactive'}</span></td>
           <td class="td text-right"><button class="btn" onclick="openUser(${u.id})"><i class="fa-solid fa-pen"></i>Edit</button></td></tr>`).join('');
@@ -1229,6 +1231,7 @@ function doPost(e) {
       $('u-email').value = u ? u.email : '';
       $('u-email').disabled = Boolean(u);
       $('u-role').value = u ? u.role : 'employee';
+      $('u-ptAdmin').checked = Boolean(u && u.extraRoles.includes('pt_admin'));
       $('u-active').checked = u ? u.active : true;
       $('u-active').disabled = Boolean(u && u.id === state.me.id);
       $('u-salary').value = u ? u.latestSalary : '';
@@ -1244,7 +1247,7 @@ function doPost(e) {
 
     async function saveUser(e) {
       e.preventDefault();
-      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, salary: $('u-salary').value || 0, password: $('u-password').value, active: $('u-active').checked,
+      const user = { id: editingUserId, name: $('u-name').value, email: $('u-email').value, role: $('u-role').value, extraRoles: $('u-ptAdmin').checked ? ['pt_admin'] : [], salary: $('u-salary').value || 0, password: $('u-password').value, active: $('u-active').checked,
         effectiveDate: $('u-effective').value, revisionNote: $('u-revNote').value };
       if (await post({ action: 'user', user }, 'Login saved')) closeModal('userModal');
     }

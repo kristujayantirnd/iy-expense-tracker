@@ -50,13 +50,17 @@ export function sessionCookie(value, maxAgeSec) {
 
 export const SESSION_MAX_AGE = SESSION_DAYS * 86400;
 
+// Extra roles a login can hold on top of its main role. pt_admin: admin in the Project Tracker only.
+export const EXTRA_ROLES = ['pt_admin'];
+// May open the Project Tracker: linked to an owner, or a Project Tracker admin.
+export const ptAccess = (link, extraRoles) => Boolean(link) || (extraRoles || []).includes('pt_admin');
 // roles: allowed roles; omit to allow any signed-in user.
 export const INACTIVE = 'This login has been deactivated. Please contact the admin.';
 
 export async function requireUser(req, res, roles) {
   const userId = readSession(getCookie(req, 'sid'));
   const rows = userId
-    ? await sql()`select id, email, name, role, salary::float8 as salary, profile, active from users where id = ${userId}`
+    ? await sql()`select id, email, name, role, extra_roles, salary::float8 as salary, profile, active from users where id = ${userId}`
     : [];
   if (!rows.length) {
     res.status(401).json({ error: 'Please sign in' });

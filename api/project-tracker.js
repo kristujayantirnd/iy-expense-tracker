@@ -37,18 +37,20 @@ export default async function handler(req, res) {
   if (req.method === 'GET' && !req.query.view) {
     // Not signed in here: sign in first, then come back.
     const userId = readSession(getCookie(req, 'sid'));
-    const [me] = userId ? await db`select id, role, active, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where id = ${userId}` : [];
+    const [me] = userId ? await db`select id, role, extra_roles, active, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where id = ${userId}` : [];
     if (!me) {
       res.setHeader('Location', '/payouts.html?next=project-tracker');
       return res.status(302).end();
     }
     if (!me.active) return page(res, 403, 'This login has been deactivated. Please contact the admin.');
     const ownerIds = (await db`select owner_id from pt_owner_links where user_id = ${me.id} order by owner_name`).map((r) => r.owner_id);
-    if (!['admin', 'management'].includes(me.role) && !ownerIds.length) {
+    // A Project Tracker admin is admin there only; the main role still governs this app's other modules.
+    const role = me.extra_roles.includes('pt_admin') ? 'admin' : me.role;
+    if (!['admin', 'management'].includes(role) && !ownerIds.length) {
       return page(res, 403, 'Your login is not linked to a Project Tracker owner yet. Ask the admin to link it (Settings, Project Tracker owners).');
     }
     res.setHeader('Referrer-Policy', 'no-referrer');
-    const pass = makePass({ uid: me.id, name: me.name, role: me.role, ownerIds, embed: req.query.embed === '1' });
+    const pass = makePass({ uid: me.id, name: me.name, role, ownerIds, embed: req.query.embed === '1' });
     res.setHeader('Location', `${PT_URL}/api/auth?sso=${pass}`);
     return res.status(302).end();
   }

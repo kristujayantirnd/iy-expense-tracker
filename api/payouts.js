@@ -1,4 +1,4 @@
-import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken, driveToken } from './_lib.js';
+import { sql, requireUser, hashPassword, verifyPassword, registerRows, sheetToken, driveToken, EXTRA_ROLES, ptAccess } from './_lib.js';
 import { copyToDrive, deleteFromDrive, SCRIPT_URL } from './_pdf.js';
 import { clearInvoiceBills, driveFileId } from './_bills.js';
 
@@ -68,7 +68,7 @@ async function readState(db, me) {
        order by i.invoice_date desc, i.id desc`,
     db`select id, name from categories order by name`,
     all
-      ? db`select u.id, u.email, u.role, u.salary::float8 as "latestSalary", coalesce(nullif(u.name, ''), u.profile->>'name', '') as name, u.active,
+      ? db`select u.id, u.email, u.role, u.extra_roles as "extraRoles", u.salary::float8 as "latestSalary", coalesce(nullif(u.name, ''), u.profile->>'name', '') as name, u.active,
               coalesce(cur.new_salary, u.salary)::float8 as salary, nxt.new_salary::float8 as "nextSalary", to_char(nxt.effective_date, 'YYYY-MM-DD') as "nextFrom"
            from users u
            left join lateral (select new_salary from salary_revisions r where r.user_id = u.id
@@ -89,7 +89,7 @@ async function readState(db, me) {
   const { signature, ...profile } = me.profile || {};
   const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${me.id}`;
   return {
-    me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature), ptLinked: Boolean(ptLink) },
+    me: { id: me.id, email: me.email, name: me.name, role: me.role, salary: me.salary, profile, hasSignature: Boolean(signature), ptLinked: ptAccess(ptLink, me.extra_roles), extraRoles: me.extra_roles },
     employer: await getEmployer(db),
     invoices,
     categories,
@@ -322,6 +322,8 @@ async function act(db, me, body) {
       if (!admin) throw new Bad('Only the admin can manage logins');
       const u = body.user || {};
       if (!ROLES.includes(u.role)) throw new Bad('Unknown role');
+      const extraRoles = [...new Set(Array.isArray(u.extraRoles) ? u.extraRoles : [])];
+      if (!extraRoles.every((r) => EXTRA_ROLES.includes(r))) throw new Bad('Unknown extra role');
       const salary = Number(u.salary || 0);
       if (!Number.isFinite(salary) || salary < 0 || salary > 1e10) throw new Bad('Salary must be a positive number');
       const password = String(u.password || '');
@@ -341,14 +343,14 @@ async function act(db, me, body) {
           await db`insert into salary_revisions (user_id, old_salary, new_salary, effective_date, note, created_by)
                    values (${id}, ${cur.salary > 0 ? cur.salary : null}, ${salary}, ${effective}, ${revNote}, ${me.id})`;
         }
-        await db`update users set name = ${name}, role = ${u.role}, salary = ${salary}, active = ${active} where id = ${id}`;
+        await db`update users set name = ${name}, role = ${u.role}, extra_roles = ${extraRoles}, salary = ${salary}, active = ${active} where id = ${id}`;
         if (password) await db`update users set password_hash = ${hashPassword(password)} where id = ${id}`;
         return;
       }
       const email = text(u.email, 200, true).toLowerCase();
       if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new Bad('Enter a valid email');
       if (!password) throw new Bad('Set a password for the new login');
-      const rows = await db`insert into users (email, name, password_hash, role, salary, active) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${salary}, ${active})
+      const rows = await db`insert into users (email, name, password_hash, role, extra_roles, salary, active) values (${email}, ${name}, ${hashPassword(password)}, ${u.role}, ${extraRoles}, ${salary}, ${active})
                             on conflict (email) do nothing returning id`;
       if (!rows.length) throw new Bad('A login with that email already exists');
       if (salary > 0) {

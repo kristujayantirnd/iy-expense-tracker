@@ -1,6 +1,6 @@
 // Checks the password and session logic. Usage: npm test
 import assert from 'node:assert/strict';
-import { hashPassword, verifyPassword, makeSession, readSession, buildRegister, registerCsv, sheetToken } from '../api/_lib.js';
+import { hashPassword, verifyPassword, makeSession, readSession, buildRegister, registerCsv, sheetToken, ptAccess } from '../api/_lib.js';
 
 const h = hashPassword('correct horse');
 assert.equal(verifyPassword('correct horse', h), true);
@@ -14,6 +14,12 @@ assert.equal(readSession(s.replace(/^42/, '43'), 'secret', 1000), null, 'tampere
 assert.equal(readSession(s, 'secret', 1000 + 8 * 864e5), null, 'expired rejected');
 assert.equal(readSession('', 'secret'), null);
 assert.equal(readSession(s, undefined), null, 'missing secret rejected');
+
+// Project Tracker access: an owner link or the pt_admin extra role.
+assert.equal(ptAccess(null, []), false);
+assert.equal(ptAccess({}, []), true);
+assert.equal(ptAccess(null, ['pt_admin']), true);
+assert.equal(ptAccess(null, null), false);
 
 // Payout = salary - 10% TDS + reimbursements, per employee per month.
 const reg = buildRegister([

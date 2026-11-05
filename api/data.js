@@ -1,4 +1,4 @@
-import { sql, requireUser } from './_lib.js';
+import { sql, requireUser, ptAccess } from './_lib.js';
 
 const ID = /^[\w-]{1,64}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -129,7 +129,7 @@ export default async function handler(req, res) {
     else if (req.method === 'DELETE') await remove(db, req.query.type, req.query.id);
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`;
-    res.status(200).json({ ...(await readState(db)), user: user.email, role: user.role, ptLinked: Boolean(ptLink) });
+    res.status(200).json({ ...(await readState(db)), user: user.email, role: user.role, ptLinked: ptAccess(ptLink, user.extra_roles) });
   } catch (e) {
     if (e instanceof Bad) return res.status(400).json({ error: e.message });
     console.error(e);

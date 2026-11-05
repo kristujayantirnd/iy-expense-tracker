@@ -47,6 +47,8 @@ alter table users alter column role set not null;
 alter table users add column if not exists salary numeric not null default 0;
 alter table users add column if not exists profile jsonb not null default '{}';
 alter table users add column if not exists name text not null default '';
+-- Extra roles on top of the main role, each widening access to one module (e.g. 'pt_admin' = Project Tracker admin).
+alter table users add column if not exists extra_roles text[] not null default '{}';
 
 -- employer/employee hold a copy of the details at the time of the last edit, so approved invoices never change.
 create table if not exists invoices (

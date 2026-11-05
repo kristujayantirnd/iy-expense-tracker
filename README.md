@@ -31,6 +31,8 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 
 **Salary revisions:** changing a login's salary asks for the date it takes effect (and an optional note) and is kept in **Salary History** (the **Employees Salary** tab, for Admin and Management). Salary invoices use the salary in effect on the invoice date; the tracker and the logins list show today's salary (with any upcoming one). Each login gets a starting record the first time `setup-db` runs.
 
+**Extra roles:** a login can hold extra roles on top of its main Role (Logins & Salaries → Edit). **Project Tracker admin** gives full admin rights in the Project Tracker (no owner link needed); every other module still follows the main Role.
+
 Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inactive login can't sign in, and anyone already signed in is locked out on their next click. Their invoices are kept. Admins can't deactivate themselves.
 
 ## Payouts (`/payouts.html`)
