@@ -174,7 +174,6 @@ const blankRow = () => ({ date: localToday(), particulars: '', amount: '', link:
 function openRequest(draftId) {
   const draft = draftId ? inv.drafts.find((d) => d.id === draftId) : null;
   $id('rqType').innerHTML = inv.config.invoiceTypes.map((t) => `<option>${esc(t)}</option>`).join('');
-  $id('rqClients').innerHTML = inv.clients.filter((c) => !c.onHold).map((c) => `<option value="${esc(c.name)}">`).join('');
   ['rqClient', 'rqPo', 'rqDesc', 'rqAmount', 'rqAttach'].forEach((id) => ($id(id).value = ''));
   $id('rqDate').value = localToday();
   $id('rqNow').checked = false;
@@ -209,6 +208,56 @@ function requestTypeChanged() {
   $id('rqDesc').required = !reimb;
   $id('rqAmount').required = !reimb;
   if (reimb) { requestClientChanged(); renderRequestRows(); }
+}
+
+// Client picker: type to filter (any part of the name), arrows + Enter, or click. Clients on hold are left out.
+let clientShown = [], clientActive = -1;
+function openClientList(all) {
+  if ($id('rqClient').disabled) return;
+  const q = all ? '' : $id('rqClient').value.trim().toLowerCase();
+  clientShown = inv.clients.filter((c) => !c.onHold && (!q || c.name.toLowerCase().includes(q)));
+  clientActive = clientShown.length ? 0 : -1;
+  renderClientList();
+}
+function renderClientList() {
+  const list = $id('rqClients');
+  list.innerHTML = clientShown.length
+    ? clientShown.map((c, i) => `<li id="client-opt-${c.id}" role="option" aria-selected="${i === clientActive}" onmousedown="event.preventDefault(); chooseClient(${c.id})">${esc(c.name)}</li>`).join('')
+    : '<li class="empty">No matching client</li>';
+  list.classList.remove('d-none');
+  $id('rqClient').setAttribute('aria-expanded', 'true');
+  $id('rqClient').setAttribute('aria-activedescendant', clientActive >= 0 ? `client-opt-${clientShown[clientActive].id}` : '');
+  const on = list.querySelector('[aria-selected="true"]');
+  if (on) on.scrollIntoView({ block: 'nearest' });
+}
+function closeClientList() {
+  $id('rqClients').classList.add('d-none');
+  $id('rqClient').setAttribute('aria-expanded', 'false');
+  requestClientChanged(); // a typed full name also continues a pending request
+}
+function toggleClientList() {
+  if ($id('rqClients').classList.contains('d-none')) { $id('rqClient').focus(); openClientList(true); } else closeClientList();
+}
+function clientListKey(e) {
+  const open = !$id('rqClients').classList.contains('d-none');
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!open) return openClientList(true);
+    if (!clientShown.length) return;
+    clientActive = (clientActive + (e.key === 'ArrowDown' ? 1 : -1) + clientShown.length) % clientShown.length;
+    renderClientList();
+  } else if (e.key === 'Enter') {
+    e.preventDefault(); // don't submit the form
+    if (open && clientActive >= 0) chooseClient(clientShown[clientActive].id);
+  } else if (e.key === 'Escape' && open) {
+    e.preventDefault(); e.stopPropagation(); // close the list, not the dialog
+    closeClientList();
+  }
+}
+function chooseClient(id) {
+  $id('rqClient').value = inv.clients.find((c) => c.id === id).name;
+  closeClientList();
+  requestClientChanged();
 }
 
 // Picking a client with a pending reimbursement request continues that request.

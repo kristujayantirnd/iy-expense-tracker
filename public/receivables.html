@@ -167,6 +167,12 @@
     .accordion-button:focus { box-shadow: 0 0 0 3px rgba(104, 0, 135, .15); }
     .accordion-button:not(.collapsed) { color: #1a1a1a; }
     .accordion-header { font-family: inherit; }
+    .iy-listbox { position: absolute; z-index: 1060; left: 0; right: 0; margin-top: .25rem; max-height: 15rem; overflow-y: auto; list-style: none; padding: .25rem 0;
+      background: #fff; color: #1a1a1a; border: 1px solid #e5e7eb; border-radius: .75rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1); }
+    .iy-listbox li { padding: .5rem .75rem; font-size: .875rem; cursor: pointer; }
+    .iy-listbox li:hover { background: #f3f4f6; }
+    .iy-listbox li[aria-selected="true"] { background: #f8eefb; color: #550070; }
+    .iy-listbox li.empty { color: #484848; cursor: default; }
     .form-select { padding-right: 2.25rem; }
     /* status colours from the shared theme (readable on white) */
     .text-success { color: #047857 !important; } .text-warning { color: #b45309 !important; } .text-info { color: #0369a1 !important; } .text-danger { color: #cc0000 !important; }
@@ -384,7 +390,15 @@
       <div class="modal-body d-grid gap-3">
         <div class="row g-3">
           <div class="col-md-6"><label class="form-label small fw-semibold" for="rqType">Invoice type</label><select id="rqType" class="form-select" required onchange="requestTypeChanged()"></select></div>
-          <div class="col-md-6"><label class="form-label small fw-semibold" for="rqClient">Client</label><input id="rqClient" class="form-control" list="rqClients" required autocomplete="off" onchange="requestClientChanged()"><datalist id="rqClients"></datalist></div>
+          <div class="col-md-6"><label class="form-label small fw-semibold" for="rqClient">Client</label>
+            <!-- Dropdown with type-to-filter (same as the Invoicing employee picker): click or type; arrows + Enter to pick -->
+            <div class="position-relative">
+              <input id="rqClient" class="form-control pe-5" required autocomplete="off" role="combobox" aria-expanded="false" aria-controls="rqClients" aria-autocomplete="list"
+                placeholder="Choose, or type to filter" onfocus="openClientList(true)" onclick="openClientList(true)" oninput="openClientList(false)"
+                onkeydown="clientListKey(event)" onblur="setTimeout(closeClientList, 150)">
+              <button type="button" tabindex="-1" aria-label="Show all clients" onmousedown="event.preventDefault(); toggleClientList()" class="btn btn-link position-absolute top-50 end-0 translate-middle-y text-muted px-3"><i class="fa-solid fa-chevron-down"></i></button>
+              <ul id="rqClients" role="listbox" aria-label="Clients" class="iy-listbox d-none"></ul>
+            </div></div>
           <div class="col-md-6"><label class="form-label small fw-semibold" for="rqDate">Invoice date</label><input id="rqDate" type="date" class="form-control" required></div>
           <div class="col-md-6"><label class="form-label small fw-semibold" for="rqPo">PO number (optional)</label><input id="rqPo" class="form-control" maxlength="300"></div>
         </div>
