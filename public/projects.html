@@ -56,7 +56,7 @@
       if (!res.ok || !state) { showMessage('Something went wrong, please try again.'); return; }
       const me = state.me;
       document.getElementById('currentUser').innerText = me.email;
-      renderModules(document.getElementById('moduleNav'), { role: me.role, ptLinked: me.ptLinked, current: 'projects' });
+      renderModules(document.getElementById('moduleNav'), { role: me.role, ptLinked: me.ptLinked, extraRoles: me.extraRoles, current: 'projects' });
       if (me.role === 'employee' && !me.ptLinked) {
         showMessage('Your login is not linked to a Project Tracker owner yet. Ask the admin to link it (Settings, Project Tracker owners).');
         return;

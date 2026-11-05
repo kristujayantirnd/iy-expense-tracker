@@ -38,4 +38,36 @@ const csv = registerCsv([{ month: '2026-11', name: '=HYPERLINK("x")', email: 'a@
 assert.equal(csv.split('\n')[1], `"2026-11","'=HYPERLINK(""x"")","a@x",1,0.1,0.9,0,0.9`, 'csv escapes quotes and formulas');
 assert.equal(sheetToken('s'), sheetToken('s'));
 assert.notEqual(sheetToken('s'), sheetToken('t'));
+
+// Client Invoice Automator: email lists and settings as imported from the sheet's Config tab.
+{
+  const { emailList, cleanConfig } = await import('../api/client-invoices.js');
+  assert.equal(emailList('a@x.com; b@y.in,  c@z.org ;'), 'a@x.com; b@y.in; c@z.org');
+  assert.equal(emailList('a@x.com; a@x.com'), 'a@x.com', 'duplicates dropped');
+  assert.throws(() => emailList('a@x.com; not-an-email'), /not-an-email/);
+  assert.throws(() => emailList(''), /at least one/);
+  assert.equal(emailList('', false), '');
+  const cfg = cleanConfig({ financeEmails: 'f@a.com; g@b.com', requestDaysBefore: 0, requestTime: '10:00', invoiceTypes: 'Service, Reimbursed Expense', reminderIntervals: '15,30,40,43' });
+  assert.deepEqual(cfg.invoiceTypes, ['Service', 'Reimbursed Expense']);
+  assert.deepEqual(cfg.reminderIntervals, [15, 30, 40, 43]);
+  assert.deepEqual(cleanConfig({ ...cfg, reminderIntervals: '' }).reminderIntervals, [], 'no reminders allowed');
+  assert.throws(() => cleanConfig({ ...cfg, reminderIntervals: '30,15' }), /increasing/);
+  assert.throws(() => cleanConfig({ ...cfg, requestTime: '25:00' }), /time/);
+  assert.throws(() => cleanConfig({ ...cfg, invoiceTypes: ' , ' }), /invoice type/);
+}
+
+// The Apps Script's date parsing and template filling (run here with a fake time zone).
+{
+  const { readFileSync } = await import('node:fs');
+  const vm = await import('node:vm');
+  const ctx = { SpreadsheetApp: {}, Utilities: {} };
+  vm.runInNewContext(readFileSync(new URL('../public/apps-script/InvoiceAutomator.gs', import.meta.url), 'utf8') + '\nthis.f = { iyDate_, iyFill_, iyFileId_ };', ctx);
+  const { iyDate_, iyFill_, iyFileId_ } = ctx.f;
+  assert.deepEqual([iyDate_('2026-11-05').getFullYear(), iyDate_('2026-11-05').getMonth(), iyDate_('2026-11-05').getDate()], [2026, 10, 5]);
+  assert.equal(iyDate_('06/04/2026').getMonth(), 3, 'dd/mm/yyyy is day first');
+  assert.equal(iyDate_('soon'), null);
+  assert.equal(iyFill_('Hi {{ContactPoint}}, {{Invoice number}} {{Invoice number}}', { ContactPoint: 'A&B', 'Invoice number': 'VD/1' }), 'Hi A&amp;B, VD/1 VD/1');
+  assert.equal(iyFileId_('https://drive.google.com/file/d/1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1/view?usp=drivesdk'), '1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1');
+}
+
 console.log('selfcheck ok');

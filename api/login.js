@@ -13,5 +13,5 @@ export default async function handler(req, res) {
   if (!rows[0].active) return res.status(403).json({ error: INACTIVE });
   const [link] = await sql()`select 1 from pt_owner_links where user_id = ${rows[0].id} limit 1`;
   res.setHeader('Set-Cookie', sessionCookie(makeSession(rows[0].id), SESSION_MAX_AGE));
-  res.status(200).json({ ok: true, email, role: rows[0].role, ptLinked: ptAccess(link, rows[0].extra_roles) });
+  res.status(200).json({ ok: true, email, role: rows[0].role, ptLinked: ptAccess(link, rows[0].extra_roles), extraRoles: rows[0].extra_roles });
 }

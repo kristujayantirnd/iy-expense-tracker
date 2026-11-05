@@ -185,6 +185,10 @@
       </div>
     </div>
 
+    <div class="manage-only d-none d-flex justify-content-end mb-3">
+      <button class="btn btn-primary fw-semibold px-3" style="border-radius: 10px;" onclick="openRequest()"><i class="fa-solid fa-paper-plane me-1"></i> Request Invoice</button>
+    </div>
+
     <div class="row g-3 mb-4">
       <div class="col-6 col-md-3"><div class="metric-card card-total"><div class="metric-title">Total Revenue</div><div class="metric-value text-dark" id="metricTotal">₹0.00</div><small class="text-muted"><span id="countTotal">0</span> Invoices</small></div></div>
       <div class="col-6 col-md-3"><div class="metric-card card-received"><div class="metric-title text-success">Total Received</div><div class="metric-value text-success" id="metricReceived">₹0.00</div><small class="text-muted"><span id="countReceived">0</span> Settled</small></div></div>
@@ -197,6 +201,10 @@
       <li class="nav-item"><button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcoming-sec" type="button"><i class="fa-solid fa-calendar-plus me-1 text-info"></i> Upcoming Receivables (<span id="tabCountUpcoming">0</span>)</button></li>
       <li class="nav-item"><button class="nav-link" id="received-tab" data-bs-toggle="tab" data-bs-target="#received-sec" type="button"><i class="fa-solid fa-circle-check me-1 text-success"></i> Payments Received (<span id="tabCountReceived">0</span>)</button></li>
       <li class="nav-item"><button class="nav-link" id="pdf-tab" data-bs-toggle="tab" data-bs-target="#pdf-sec" type="button"><i class="fa-solid fa-file-pdf me-1 text-danger"></i> PDF Layout</button></li>
+      <!-- Client Invoice Automator: Admin and Finance Admin only (shown by invoice-automator.js) -->
+      <li class="nav-item manage-only d-none"><button class="nav-link" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-sec" type="button"><i class="fa-solid fa-pen-to-square me-1 text-primary"></i> Manage Invoices</button></li>
+      <li class="nav-item manage-only d-none"><button class="nav-link" id="clients-tab" data-bs-toggle="tab" data-bs-target="#clients-sec" type="button"><i class="fa-solid fa-address-book me-1 text-primary"></i> Clients</button></li>
+      <li class="nav-item manage-only d-none"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-sec" type="button"><i class="fa-solid fa-gear me-1 text-secondary"></i> Automator Settings</button></li>
     </ul>
 
     <div class="tab-content" id="dashboardTabsContent">
@@ -233,11 +241,138 @@
         <div class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i> The PDF respects the Service/Reimbursement toggle, due-date range and client search above.</div>
         <div class="pdf-preview-wrap"><div id="pdfSheet"></div></div>
       </div>
+
+      <div class="tab-pane fade" id="manage-sec" role="tabpanel">
+        <div class="filter-card p-3">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">Rows of the sheet's Invoice Extracts tab. Add the invoice number and PDF link, then <b>Send to client</b>. Reminders then go out by themselves at the configured intervals until you mark the payment received.</p>
+            <div class="d-flex gap-2 align-items-center">
+              <label for="manageShow" class="visually-hidden">Show</label>
+              <select id="manageShow" class="form-select form-select-sm" style="width:auto" onchange="renderManage()">
+                <option value="open">Open (not paid)</option><option value="all">All</option>
+              </select>
+              <button class="btn btn-light border btn-sm" onclick="loadRows()" title="Refresh from the sheet" aria-label="Refresh from the sheet"><i class="fa-solid fa-rotate-right"></i></button>
+            </div>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="manageTable"></table></div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="clients-sec" role="tabpanel">
+        <div class="filter-card p-3">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">The address book for client emails. The first email is the main recipient; the rest are copied. Clients on hold get no emails.</p>
+            <button class="btn btn-primary btn-sm fw-semibold" onclick="openClient()"><i class="fa-solid fa-plus me-1"></i>Add client</button>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="clientsTable"></table></div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="settings-sec" role="tabpanel">
+        <form class="filter-card p-3 mb-3" onsubmit="saveConfig(event)">
+          <div class="row g-3">
+            <div class="col-md-6"><label class="form-label small fw-semibold" for="cfgFinance">Finance Team emails (first one is "To", the rest are copied)</label>
+              <textarea id="cfgFinance" class="form-control" rows="2"></textarea></div>
+            <div class="col-6 col-md-3"><label class="form-label small fw-semibold" for="cfgDays">Request email: days before invoice date</label>
+              <input id="cfgDays" type="number" min="0" max="60" class="form-control" required></div>
+            <div class="col-6 col-md-3"><label class="form-label small fw-semibold" for="cfgTime">Request email: time</label>
+              <input id="cfgTime" type="time" class="form-control" required></div>
+            <div class="col-md-6"><label class="form-label small fw-semibold" for="cfgTypes">Invoice types (comma separated)</label>
+              <input id="cfgTypes" class="form-control" required></div>
+            <div class="col-md-6"><label class="form-label small fw-semibold" for="cfgIntervals">Reminder intervals (days after invoice date, comma separated)</label>
+              <input id="cfgIntervals" class="form-control" placeholder="15, 30, 40, 43"></div>
+            <div class="col-12" id="templateFields"></div>
+          </div>
+          <button class="btn btn-primary fw-semibold mt-3"><i class="fa-solid fa-floppy-disk me-1"></i>Save settings</button>
+        </form>
+        <div class="filter-card p-3 admin-only d-none">
+          <h2 class="h6 fw-bold">Connect the Google Sheet (admin)</h2>
+          <form class="d-flex flex-wrap gap-2 mb-2" onsubmit="saveScript(event)">
+            <label for="cfgScript" class="visually-hidden">Apps Script web app link</label>
+            <input id="cfgScript" class="form-control" style="flex:1;min-width:16rem" placeholder="https://script.google.com/macros/s/…/exec">
+            <button class="btn btn-primary fw-semibold">Save link</button>
+            <button type="button" class="btn btn-light border fw-semibold" onclick="importSheet()" title="Copies the sheet's Config and ClientList tabs into the webapp"><i class="fa-solid fa-file-import me-1"></i>Import Config &amp; ClientList from sheet</button>
+          </form>
+          <details class="small">
+            <summary class="fw-semibold" style="cursor:pointer">One-time setup in the sheet's Apps Script (about 5 minutes)</summary>
+            <ol class="mt-2">
+              <li>Open the sheet, then <b>Extensions → Apps Script</b>. Add a new script file named <code>InvoiceAutomator</code> and paste the code below.</li>
+              <li><b>Deploy → New deployment</b> → Web app; Execute as <b>Me</b>, Who has access <b>Anyone</b> → Deploy. Allow the Gmail, Drive and Sheets access it asks for. Paste the <b>Web app URL</b> above and save.</li>
+              <li>Click <b>Import Config &amp; ClientList from sheet</b>, then check the Clients tab and the settings above.</li>
+              <li>In the editor, run <code>iyInstallTriggers</code> once. It swaps the old timers for the new ones.</li>
+              <li>Delete the old files <code>MenuAndUI.gs</code>, <code>Form.html</code>, <code>EmailTemplate.html</code>, <code>Email Scheduler</code> and <code>ClientEmail.gs</code>. Keep <code>Utils.gs</code> and the PDF extraction script.</li>
+            </ol>
+            <div class="d-flex gap-2 align-items-start">
+              <textarea id="scriptCode" readonly rows="8" class="form-control font-monospace" style="font-size:11px" aria-label="Apps Script code"></textarea>
+              <button type="button" class="btn btn-light border" onclick="copyCode()"><i class="fa-solid fa-copy"></i> Copy</button>
+            </div>
+          </details>
+        </div>
+      </div>
     </div>
   </div>
 
+  <!-- Automator dialogs -->
+  <div class="modal fade" id="requestModal" tabindex="-1" aria-labelledby="requestTitle" aria-hidden="true">
+    <div class="modal-dialog"><form class="modal-content" onsubmit="submitRequest(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="requestTitle">Request Invoice</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body d-grid gap-3">
+        <div><label class="form-label small fw-semibold" for="rqType">Invoice type</label><select id="rqType" class="form-select" required></select></div>
+        <div><label class="form-label small fw-semibold" for="rqClient">Client</label><input id="rqClient" class="form-control" list="rqClients" required autocomplete="off"><datalist id="rqClients"></datalist></div>
+        <div><label class="form-label small fw-semibold" for="rqDate">Invoice date</label><input id="rqDate" type="date" class="form-control" required></div>
+        <div><label class="form-label small fw-semibold" for="rqPo">PO number (optional)</label><input id="rqPo" class="form-control" maxlength="300"></div>
+        <div><label class="form-label small fw-semibold" for="rqDesc">Item &amp; description</label><textarea id="rqDesc" class="form-control" rows="2" maxlength="1000" required></textarea></div>
+        <div><label class="form-label small fw-semibold" for="rqAmount">Amount without GST (₹)</label><input id="rqAmount" type="number" min="0.01" step="0.01" class="form-control" required></div>
+        <label class="d-flex gap-2 small"><input id="rqNow" type="checkbox"> Email the Finance Team now (otherwise at the scheduled time)</label>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Submit request</button></div>
+    </form></div>
+  </div>
+
+  <div class="modal fade" id="rowModal" tabindex="-1" aria-labelledby="rowTitle" aria-hidden="true">
+    <div class="modal-dialog"><form class="modal-content" onsubmit="saveRow(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="rowTitle">Update invoice</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body d-grid gap-3">
+        <p class="small text-muted mb-0" id="rowInfo"></p>
+        <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…"></div>
+        <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view"></div>
+        <div><label class="form-label small fw-semibold" for="rwStatus">Status</label>
+          <select id="rwStatus" class="form-select" onchange="toggleReceived()">
+            <option value="NEW_ENTRY">New entry</option><option value="APPROVED">Approved (ready to email)</option>
+            <option value="REMINDER">Emailed, reminders running</option><option value="Payment Received">Payment received</option>
+          </select></div>
+        <div id="rwReceivedBox"><label class="form-label small fw-semibold" for="rwReceived">Payment received on</label><input id="rwReceived" type="date" class="form-control"></div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Save to sheet</button></div>
+    </form></div>
+  </div>
+
+  <div class="modal fade" id="clientModal" tabindex="-1" aria-labelledby="clientTitle" aria-hidden="true">
+    <div class="modal-dialog"><form class="modal-content" onsubmit="saveClient(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="clientTitle">Client</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body d-grid gap-3">
+        <div><label class="form-label small fw-semibold" for="clName">Client name (exactly as on the invoice)</label><input id="clName" class="form-control" maxlength="200" required>
+          <div class="form-text" id="clNameHint">The sheet's invoice rows refer to this name, so it can't be changed later.</div></div>
+        <div><label class="form-label small fw-semibold" for="clEmails">Emails (first is "To", the rest are copied)</label><textarea id="clEmails" class="form-control" rows="3" required></textarea></div>
+        <div><label class="form-label small fw-semibold" for="clContact">Contact person (used as {{ContactPoint}})</label><input id="clContact" class="form-control" maxlength="100"></div>
+        <label class="d-flex gap-2 small"><input id="clHold" type="checkbox"> On hold (no client emails or reminders)</label>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Save client</button></div>
+    </form></div>
+  </div>
+
+  <div class="modal fade" id="previewModal" tabindex="-1" aria-labelledby="previewTitle" aria-hidden="true">
+    <div class="modal-dialog modal-lg"><div class="modal-content">
+      <div class="modal-header"><h2 class="modal-title h5" id="previewTitle">Email preview (sample values)</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body p-0"><iframe id="previewFrame" title="Email preview" sandbox="" style="width:100%;height:70vh;border:0"></iframe></div>
+    </div></div>
+  </div>
+
+  <div id="iyToast" class="position-fixed bottom-0 end-0 m-3 alert d-none shadow" style="z-index:2000;max-width:28rem" role="status"></div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="/invoice-automator.js"></script>
   <script>
     let rawInvoices = [];
     let currentFiltered = [];
@@ -253,9 +388,11 @@
       const state = await res.json().catch(() => null);
       if (!state || !state.me) { showError('Something went wrong, please try again.'); return; }
       document.getElementById('currentUser').innerText = state.me.email;
-      renderModules(document.getElementById('moduleNav'), { role: state.me.role, ptLinked: state.me.ptLinked, current: 'receivables' });
-      if (state.me.role === 'employee') { showError('Receivables is only for Admin and Management.'); return; }
+      renderModules(document.getElementById('moduleNav'), { role: state.me.role, ptLinked: state.me.ptLinked, extraRoles: state.me.extraRoles, current: 'receivables' });
+      const financeAdmin = state.me.role === 'admin' || state.me.extraRoles.includes('finance_admin');
+      if (state.me.role === 'employee' && !financeAdmin) { showError('Receivables is only for Admin, Management and Finance Admin.'); return; }
       loadData();
+      if (financeAdmin) startAutomator(state.me.role === 'admin'); // Management sees the dashboard only
     }
 
     async function loadData() {

@@ -31,7 +31,7 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 
 **Salary revisions:** changing a login's salary asks for the date it takes effect (and an optional note) and is kept in **Salary History** (the **Employees Salary** tab, for Admin and Management). Salary invoices use the salary in effect on the invoice date; the tracker and the logins list show today's salary (with any upcoming one). Each login gets a starting record the first time `setup-db` runs.
 
-**Extra roles:** a login can hold extra roles on top of its main Role (Logins & Salaries → Edit). **Project Tracker admin** gives full admin rights in the Project Tracker (no owner link needed); every other module still follows the main Role.
+**Extra roles:** a login can hold extra roles on top of its main Role (Logins & Salaries → Edit). **Project Tracker admin** gives full admin rights in the Project Tracker (no owner link needed). **Finance Admin** opens Receivables and runs the Client Invoice Automator. Every other module still follows the main Role.
 
 Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inactive login can't sign in, and anyone already signed in is locked out on their next click. Their invoices are kept. Admins can't deactivate themselves.
 
@@ -44,7 +44,7 @@ Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inacti
 - Each reimbursement row can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change each row's category. The admin can also raise salary invoices for any employee.
 - **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, frees that salary month, deletes its uploaded bill files (unless another live invoice uses them) and moves its Drive copy to Drive's trash. Cancelled invoices are hidden from the list unless the Cancelled filter is picked.
 - The Expense Tracker's **Direct Expenses** tab lists categorised reimbursement rows (pending, approved, submitted, paid) in a date range, current month by default. They are listed only, not added to the tracker's totals or budgets.
-- **Receivables** module (`/receivables.html`, Admin and Management): the company's invoice & receivables Google Sheet, read through its Apps Script (`getDashboardData`) via a key-protected data link (Settings → Receivables). The sheet stays the backend.
+- **Receivables** module (`/receivables.html`, Admin, Management and Finance Admin): the company's invoice & receivables Google Sheet, read through its Apps Script (`getDashboardData`) via a key-protected data link (Settings → Receivables). The sheet stays the backend.
 - The invoice list shows 8 per page, with one search box for invoice number, type or employee name.
 - After approval the admin sets **Submitted** → **Payment Completed** (dropdown on the invoice; still counts as approved).
 - **Google Drive copy:** on approval the invoice PDF (with bills) is saved to the Drive folder set in *Settings* (gear icon), through a small Google Apps Script the admin deploys once (code and steps are on that page). If the copy fails, approval still stands and the invoice shows the error with **Retry**.
@@ -52,3 +52,12 @@ Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inacti
 - **Google Sheet:** Admin → *Settings* (gear icon) shows an `=IMPORTDATA(...)` formula to paste into a sheet. It refreshes about hourly. The link's secret comes from `SESSION_SECRET`, so changing that secret changes the link.
 
 Commits must be authored as mary@invincibleyou.world, or Vercel (Hobby plan) blocks the deploy.
+
+## Client Invoice Automator (on the Receivables page)
+
+For Admin and Finance Admin; Management sees the Receivables dashboard only. The **client list** and **settings** (Finance Team emails, request schedule, invoice types, reminder intervals, the three email templates) live in the webapp. The invoice rows stay in the sheet (`RequestInvoice`, `Invoice Extracts`) and emails go out from the sheet owner's Gmail, through the sheet's Apps Script (`public/apps-script/InvoiceAutomator.gs`, copied with the key from **Automator Settings**).
+
+- **Request Invoice** adds the rows to both tabs (status `NEW_ENTRY`); the Finance Team email goes out now or at the scheduled time (hourly timer `iyRequestEmails`).
+- **Manage Invoices** → Update writes the invoice number, PDF link, status and payment-received date into that sheet row. **Send to client** emails the PDF and sets `REMINDER`.
+- Reminders reply in the same Gmail thread once the days since the invoice date reach each interval (daily timer `iyReminders`), until the status is `Payment Received`. Clients on hold get no emails.
+- The script reads settings from `/api/client-invoices?key=…`; if the webapp can't be reached it sends nothing.

@@ -50,8 +50,10 @@ export function sessionCookie(value, maxAgeSec) {
 
 export const SESSION_MAX_AGE = SESSION_DAYS * 86400;
 
-// Extra roles a login can hold on top of its main role. pt_admin: admin in the Project Tracker only.
-export const EXTRA_ROLES = ['pt_admin'];
+// Extra roles a login can hold on top of its main role.
+// pt_admin: admin in the Project Tracker only. finance_admin: runs the Client Invoice Automator (Receivables page).
+export const EXTRA_ROLES = ['pt_admin', 'finance_admin'];
+export const isFinanceAdmin = (u) => u?.role === 'admin' || (u?.extra_roles || []).includes('finance_admin');
 // May open the Project Tracker: linked to an owner, or a Project Tracker admin.
 export const ptAccess = (link, extraRoles) => Boolean(link) || (extraRoles || []).includes('pt_admin');
 // roles: allowed roles; omit to allow any signed-in user.
@@ -85,6 +87,8 @@ export const sheetToken = (secret = process.env.SESSION_SECRET) => sign('payout-
 export const driveToken = (secret = process.env.SESSION_SECRET) => sign('drive-copy', secret);
 // Key the Receivables Apps Script checks before returning sheet data.
 export const receivablesToken = (secret = process.env.SESSION_SECRET) => sign('receivables', secret);
+// Key shared with the Client Invoice Automator Apps Script (both directions).
+export const invoiceToken = (secret = process.env.SESSION_SECRET) => sign('client-invoices', secret);
 
 export const TDS_RATE = 0.1;
 const round2 = (n) => Math.round(n * 100) / 100;

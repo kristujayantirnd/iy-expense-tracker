@@ -1,16 +1,17 @@
 // Receivables module: the company's invoice & receivables Google Sheet, read through its Apps Script
-// (getDashboardData). The sheet stays the backend; only Admin and Management can read it here.
+// (getDashboardData). Admin, Management and Finance Admin can read it here.
 // GET            -> { invoices } from the sheet
 // GET ?config=1  -> admin: { script, key } for Settings
 // POST {script}  -> admin: save the Apps Script web app link
-import { sql, requireUser, receivablesToken } from './_lib.js';
+import { sql, requireUser, receivablesToken, isFinanceAdmin } from './_lib.js';
 
 const SCRIPT_URL = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
 
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  const me = await requireUser(req, res, ['admin', 'management']);
+  const me = await requireUser(req, res);
   if (!me) return;
+  if (me.role !== 'management' && !isFinanceAdmin(me)) return res.status(403).json({ error: 'You do not have access to this' });
   const db = sql();
   const [row] = await db`select value from settings where key = 'receivablesScript'`;
   const script = row?.value || '';

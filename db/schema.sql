@@ -138,3 +138,15 @@ alter table invoices add column if not exists direct boolean not null default fa
 drop index if exists one_open_reimbursement;
 create unique index one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected') and not direct;
 create unique index if not exists one_open_direct on invoices (direct) where direct and kind = 'reimbursement' and status in ('pending', 'rejected')
+
+-- Client Invoice Automator: the client address book (settings live in settings.invoiceConfig).
+-- The sheet's invoice rows refer to clients by name, so a name is never changed once created.
+create table if not exists clients (
+  id serial primary key,
+  name text not null,
+  emails text not null,
+  contact text not null default '',
+  on_hold boolean not null default false,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists clients_name_key on clients (lower(name));
