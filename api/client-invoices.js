@@ -161,8 +161,13 @@ async function act(db, me, body) {
       const status = String(u.status || '');
       if (!STATUSES.includes(status)) throw new Bad('Unknown status');
       const pdfUrl = driveLink(u.pdfUrl, 'Paste the Google Drive link of the invoice PDF');
+      const invoiceNumber = text(u.invoiceNumber, 50);
+      const withGst = u.withGst === '' || u.withGst == null ? null : Math.round(Number(u.withGst) * 100) / 100;
+      if (withGst !== null && (!Number.isFinite(withGst) || withGst <= 0 || withGst > 1e10)) throw new Bad('Amount with GST must be a number above 0');
+      const missing = readyMissing({ invoiceNumber, pdfUrl, withGst });
+      if (['APPROVED', 'REMINDER'].includes(status) && missing.length) throw new Bad(`Add the ${missing.join(', ')} before choosing this status`);
       await script(db, {
-        action: 'update', row: rowNo(u.row), client: text(u.client, 200, true), invoiceNumber: text(u.invoiceNumber, 50), pdfUrl, status,
+        action: 'update', row: rowNo(u.row), client: text(u.client, 200, true), invoiceNumber, pdfUrl, withGst, status,
         receivedDate: status === 'Payment Received' ? date(u.receivedDate) : '',
       });
       return { notice: 'Invoice updated in the sheet' };
@@ -229,6 +234,11 @@ function driveLink(v, message) {
   if (url && !/^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/.test(url)) throw new Bad(message);
   return url;
 }
+
+// What an invoice still needs before it can be Approved or Emailed.
+export const readyMissing = ({ invoiceNumber, pdfUrl, withGst }) => [
+  !invoiceNumber && 'invoice number', !pdfUrl && 'invoice PDF Google Drive link', !(withGst > 0) && 'amount with GST',
+].filter(Boolean);
 
 function idOf(v) {
   const n = Number(v);

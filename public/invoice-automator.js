@@ -95,7 +95,7 @@ function renderManage() {
   $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice No</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>Due</th><th>PDF</th><th>Status</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
       const link = safeLink(r.pdfUrl);
-      const ready = ['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase()) && r.invoiceNumber && link;
+      const ready = ['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase()) && r.invoiceNumber && link && r.withGst > 0;
       return `<tr>
         <td style="white-space:normal;min-width:12rem">${esc(r.client)}</td>
         <td class="fw-semibold">${esc(r.invoiceNumber) || '<span class="text-muted">-</span>'}</td>
@@ -136,10 +136,40 @@ function openRow(rowNo) {
   $id('rowInfo').innerText = `${editingRow.client} · invoice date ${editingRow.invoiceDate} · ${formatINR(editingRow.amount)}`;
   $id('rwNumber').value = editingRow.invoiceNumber;
   $id('rwPdf').value = editingRow.pdfUrl;
+  $id('rwGst').value = editingRow.withGst || '';
   $id('rwStatus').value = Object.keys(ROW_STATUS).find((s) => s.toLowerCase() === editingRow.status.toLowerCase()) || 'NEW_ENTRY';
   $id('rwReceived').value = editingRow.receivedDateIso || localToday();
   toggleReceived();
+  rowReadiness();
   modal('rowModal').show();
+}
+
+// Approved / Emailed need the invoice number, the PDF link and the amount with GST (checked again on the server).
+const NEEDS_DETAILS = ['APPROVED', 'REMINDER'];
+// Preview only; the sheet script saves the same figure from the row's own amount (keep in step with iyToBeReceived_).
+const toBeReceived = (withGst, withoutGst) => Math.round((withGst - 0.1 * withoutGst) * 100) / 100;
+const DRIVE_LINK = /^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/;
+function rowMissing() {
+  return [
+    !$id('rwNumber').value.trim() && 'invoice number',
+    !DRIVE_LINK.test($id('rwPdf').value.trim()) && 'invoice PDF Google Drive link',
+    !(Number($id('rwGst').value) > 0) && 'amount with GST',
+  ].filter(Boolean);
+}
+function rowReadiness() {
+  const gst = Number($id('rwGst').value);
+  $id('rwBase').innerText = formatINR(editingRow.amount);
+  const calc = gst > 0 ? toBeReceived(gst, editingRow.amount) : 0;
+  // Opened unchanged: show what the sheet holds, and flag it if saving would change it.
+  const sheet = gst > 0 && gst === editingRow.withGst ? editingRow.toReceive : 0;
+  $id('rwToReceive').innerText = gst > 0 ? formatINR(calc) : '-';
+  $id('rwSheetNote').innerText = sheet && Math.abs(sheet - calc) > 0.005 ? ` The sheet now has ${formatINR(sheet)}; saving replaces it.` : '';
+  const missing = rowMissing();
+  const sel = $id('rwStatus');
+  [...sel.options].forEach((o) => { if (NEEDS_DETAILS.includes(o.value)) o.disabled = missing.length > 0 && o.value !== sel.value; });
+  $id('rwReadyHint').classList.toggle('d-none', !missing.length);
+  $id('rwReadyHint').innerText = `To choose Approved or Emailed, add the ${missing.join(', ')}.`;
+  $id('rwReadyHint').classList.toggle('text-danger', missing.length > 0 && NEEDS_DETAILS.includes(sel.value));
 }
 
 function toggleReceived() {
@@ -150,9 +180,11 @@ function toggleReceived() {
 
 async function saveRow(e) {
   e.preventDefault();
+  const missing = rowMissing();
+  if (NEEDS_DETAILS.includes($id('rwStatus').value) && missing.length) return toast(`Add the ${missing.join(', ')} before choosing this status`, false);
   const btn = e.submitter;
   btn.disabled = true;
-  const ok = await invPost({ action: 'update', update: { row: editingRow.row, client: editingRow.client, invoiceNumber: $id('rwNumber').value, pdfUrl: $id('rwPdf').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value } }, 'Saved');
+  const ok = await invPost({ action: 'update', update: { row: editingRow.row, client: editingRow.client, invoiceNumber: $id('rwNumber').value, pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value } }, 'Saved');
   btn.disabled = false;
   if (ok) { modal('rowModal').hide(); loadRows(); loadData(); }
 }

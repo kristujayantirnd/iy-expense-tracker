@@ -41,7 +41,7 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
 
 // Client Invoice Automator: email lists and settings as imported from the sheet's Config tab.
 {
-  const { emailList, cleanConfig, cleanItems } = await import('../api/client-invoices.js');
+  const { emailList, cleanConfig, cleanItems, readyMissing } = await import('../api/client-invoices.js');
   assert.equal(emailList('a@x.com; b@y.in,  c@z.org ;'), 'a@x.com; b@y.in; c@z.org');
   assert.equal(emailList('a@x.com; a@x.com'), 'a@x.com', 'duplicates dropped');
   assert.throws(() => emailList('a@x.com; not-an-email'), /not-an-email/);
@@ -58,6 +58,10 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
   const items = cleanItems([{ particulars: ' Flight ', amount: '52814', date: '2026-11-01' }, { particulars: 'Cab', amount: 702.005, date: '2099-01-01', link: '' }], '2026-11-05');
   assert.deepEqual(items, [{ date: '2026-11-01', particulars: 'Flight', amount: 52814, link: '' }, { date: '2026-11-05', particulars: 'Cab', amount: 702.01, link: '' }]);
   assert.throws(() => cleanItems([]), /at least one row/);
+  // Approved / Emailed need all three details.
+  assert.deepEqual(readyMissing({ invoiceNumber: 'VD/1', pdfUrl: 'https://drive.google.com/file/d/x', withGst: 590000 }), []);
+  assert.deepEqual(readyMissing({ invoiceNumber: '', pdfUrl: '', withGst: null }), ['invoice number', 'invoice PDF Google Drive link', 'amount with GST']);
+  assert.deepEqual(readyMissing({ invoiceNumber: 'VD/1', pdfUrl: 'x', withGst: 0 }), ['amount with GST']);
   assert.throws(() => cleanItems([{ particulars: 'Cab', amount: 0 }]), /Row 1/);
   assert.throws(() => cleanItems([{ particulars: 'Cab', amount: 5, link: 'https://example.com/bill.pdf' }]), /Row 1: the bill/);
   assert.equal(cleanItems([{ particulars: 'Cab', amount: 5, link: 'https://drive.google.com/file/d/1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1/view' }])[0].link.length > 0, true);
@@ -68,8 +72,15 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
   const { readFileSync } = await import('node:fs');
   const vm = await import('node:vm');
   const ctx = { SpreadsheetApp: {}, Utilities: {} };
-  vm.runInNewContext(readFileSync(new URL('../public/apps-script/InvoiceAutomator.gs', import.meta.url), 'utf8') + '\nthis.f = { iyDate_, iyFill_, iyFileId_ };', ctx);
-  const { iyDate_, iyFill_, iyFileId_ } = ctx.f;
+  vm.runInNewContext(readFileSync(new URL('../public/apps-script/InvoiceAutomator.gs', import.meta.url), 'utf8') + '\nthis.f = { iyDate_, iyFill_, iyFileId_, iyToBeReceived_ };', ctx);
+  const { iyDate_, iyFill_, iyFileId_, iyToBeReceived_ } = ctx.f;
+  // Amt(ToBeReceived) as in the sheet's existing rows (service with GST, reimbursement without).
+  assert.equal(iyToBeReceived_(413000, 350000), 378000);
+  assert.equal(iyToBeReceived_(1911600, 1620000), 1749600);
+  assert.equal(iyToBeReceived_(41047, 41047), 36942.3);
+  const page = readFileSync(new URL('../public/invoice-automator.js', import.meta.url), 'utf8');
+  const toBeReceived = vm.runInNewContext(page.match(/const toBeReceived = [^;]+;/)[0].replace('const toBeReceived =', '') );
+  assert.equal(toBeReceived(413000, 350000), 378000, 'the dialog preview uses the same formula');
   assert.deepEqual([iyDate_('2026-11-05').getFullYear(), iyDate_('2026-11-05').getMonth(), iyDate_('2026-11-05').getDate()], [2026, 10, 5]);
   assert.equal(iyDate_('06/04/2026').getMonth(), 3, 'dd/mm/yyyy is day first');
   assert.equal(iyDate_('soon'), null);

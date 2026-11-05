@@ -5,6 +5,9 @@
 const APP_URL = '__APP_URL__';
 const APP_KEY = '__KEY__';
 const DUE_DAYS = 45; // Due Date = Invoice Date + 45 days
+const TDS_RATE = 0.1;
+// Amt(ToBeReceived) = Amount with GST - 10% TDS on the amount without GST (matches the existing rows, e.g. 4,13,000 - 35,000).
+const iyToBeReceived_ = (withGst, withoutGst) => Math.round((withGst - TDS_RATE * withoutGst) * 100) / 100;
 const REMINDER_TAG = 'GAS_INV_REMINDER';
 const REMINDER_MARKER = '<span style="display:none;" class="gas-inv-reminder-tag">' + REMINDER_TAG + '</span>';
 
@@ -76,7 +79,7 @@ function iyTab_(name) {
 function iyExtracts_() {
   const t = iyTab_('Invoice Extracts');
   const c = {
-    client: t.col('client'), number: t.col('invoicenumber'), date: t.col('invoicedate'), amount: t.col('amountwogst'),
+    client: t.col('client'), number: t.col('invoicenumber'), date: t.col('invoicedate'), amount: t.col('amountwogst'), withGst: t.col('amtwithgst'), toReceive: t.col('amttobereceived'),
     due: t.col('duedate'), pdf: t.col('invoice'), status: t.col('paymentstatus'), thread: t.col('clientemailthread'),
     type: t.col('invoicetype'), received: t.col('pymntrcvddate'),
   };
@@ -110,6 +113,7 @@ function iyList_() {
     rows.push({
       row: i + 1, client: String(v[c.client]).trim(), invoiceNumber: String(v[c.number] || '').trim(),
       invoiceDate: iyFmt_(date || v[c.date]), invoiceDateIso: iyIso_(date), amount: Number(String(v[c.amount]).replace(/[^0-9.-]+/g, '')) || 0,
+      withGst: Number(String(v[c.withGst]).replace(/[^0-9.-]+/g, '')) || 0, toReceive: Number(String(v[c.toReceive]).replace(/[^0-9.-]+/g, '')) || 0,
       dueDate: iyFmt_(iyDate_(v[c.due]) || v[c.due]), pdfUrl: String(v[c.pdf] || '').trim(), status: String(v[c.status] || '').trim(),
       emailed: Boolean(String(v[c.thread] || '').trim()), invoiceType: String(v[c.type] || '').trim(),
       receivedDate: iyFmt_(iyDate_(v[c.received]) || v[c.received]), receivedDateIso: iyIso_(iyDate_(v[c.received])),
@@ -175,10 +179,15 @@ function iyRequest_(b) {
 
 function iyUpdate_(b) {
   const x = iyExtracts_();
-  iyRow_(x, b.row, b.client);
+  const v = iyRow_(x, b.row, b.client);
   const cell = (col) => x.sh.getRange(b.row, col + 1);
   cell(x.c.number).setValue(b.invoiceNumber || ' ');
   cell(x.c.pdf).setValue(b.pdfUrl || '');
+  if (b.withGst) { // left as is when not given
+    cell(x.c.withGst).setValue(Number(b.withGst)).setNumberFormat('₹#,##0.00');
+    const withoutGst = Number(String(v[x.c.amount]).replace(/[^0-9.-]+/g, '')) || 0;
+    cell(x.c.toReceive).setValue(iyToBeReceived_(Number(b.withGst), withoutGst)).setNumberFormat('₹#,##0.00');
+  }
   cell(x.c.status).setValue(b.status);
   if (b.status === 'Payment Received') cell(x.c.received).setValue(iyDate_(b.receivedDate)).setNumberFormat('dd/mm/yyyy');
   return { ok: true };
@@ -195,6 +204,7 @@ function iySendClient_(b) {
   if (!number) throw new Error('Add the invoice number first');
   const fileId = iyFileId_(v[c.pdf]);
   if (!fileId) throw new Error('Add the invoice PDF link first');
+  if (!(Number(String(v[c.withGst]).replace(/[^0-9.-]+/g, '')) > 0)) throw new Error('Add the amount with GST first');
   const setup = iySetup_();
   const client = setup.clients[iyKey_(v[c.client])];
   if (!client || !client.primaryEmail) throw new Error('"' + v[c.client] + '" is not in the webapp client list (or has no email)');

@@ -434,13 +434,16 @@
       <div class="modal-header"><h2 class="modal-title h5" id="rowTitle">Update invoice</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
       <div class="modal-body d-grid gap-3">
         <p class="small text-muted mb-0" id="rowInfo"></p>
-        <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…"></div>
-        <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view"></div>
+        <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…" oninput="rowReadiness()"></div>
+        <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" oninput="rowReadiness()"></div>
+        <div><label class="form-label small fw-semibold" for="rwGst">Amount with GST (₹)</label><input id="rwGst" type="number" min="0.01" step="0.01" class="form-control" oninput="rowReadiness()">
+          <div class="form-text">Amount to be received (saved to Amt(ToBeReceived)): <b id="rwToReceive">-</b> <span class="text-muted">= amount with GST − 10% TDS on <span id="rwBase"></span> (amount w/o GST)</span><span id="rwSheetNote" class="text-warning"></span></div></div>
         <div><label class="form-label small fw-semibold" for="rwStatus">Status</label>
-          <select id="rwStatus" class="form-select" onchange="toggleReceived()">
+          <select id="rwStatus" class="form-select" onchange="toggleReceived(); rowReadiness()">
             <option value="NEW_ENTRY">New entry</option><option value="APPROVED">Approved (ready to email)</option>
             <option value="REMINDER">Emailed, reminders running</option><option value="Payment Received">Payment received</option>
-          </select></div>
+          </select>
+          <div class="form-text" id="rwReadyHint">Fill in the invoice number, PDF link and amount with GST to choose Approved or Emailed.</div></div>
         <div id="rwReceivedBox"><label class="form-label small fw-semibold" for="rwReceived">Payment received on</label><input id="rwReceived" type="date" class="form-control"></div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Save to sheet</button></div>
