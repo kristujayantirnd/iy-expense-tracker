@@ -137,7 +137,7 @@ create table if not exists pt_owner_links (
 alter table invoices add column if not exists direct boolean not null default false;
 drop index if exists one_open_reimbursement;
 create unique index one_open_reimbursement on invoices (user_id) where kind = 'reimbursement' and status in ('pending', 'rejected') and not direct;
-create unique index if not exists one_open_direct on invoices (direct) where direct and kind = 'reimbursement' and status in ('pending', 'rejected')
+create unique index if not exists one_open_direct on invoices (direct) where direct and kind = 'reimbursement' and status in ('pending', 'rejected');
 
 -- Client Invoice Automator: the client address book (settings live in settings.invoiceConfig).
 -- The sheet's invoice rows refer to clients by name, so a name is never changed once created.
