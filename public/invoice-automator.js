@@ -1,6 +1,6 @@
 // Client Invoice Automator on the Receivables page (Admin and Finance Admin only).
 // Talks to /api/client-invoices; the sheet rows and Gmail are reached through the sheet's Apps Script.
-let inv = { config: null, clients: [], rows: [], admin: false };
+let inv = { config: null, clients: [], drafts: [], rows: [], admin: false };
 
 const TEMPLATES = [
   { key: 'requestTemplate', label: 'Finance Team request email', vars: ['InvoiceType', 'Client', 'PO_Number', 'ItemDescription', 'AmountwithoutGST', 'InvoiceDate'] },
@@ -35,6 +35,8 @@ async function invPost(body, done) {
     if (!res.ok) throw new Error(data.error || 'Something went wrong');
     inv.config = data.config;
     inv.clients = data.clients;
+    inv.drafts = data.drafts;
+    renderDrafts();
     toast(data.notice || done);
     return data;
   } catch (e) {
@@ -60,8 +62,9 @@ async function startAutomator(admin) {
   const res = await fetch('/api/client-invoices');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || 'Could not load the automator settings', false);
-  Object.assign(inv, { config: data.config, clients: data.clients });
+  Object.assign(inv, { config: data.config, clients: data.clients, drafts: data.drafts });
   renderClients();
+  renderDrafts();
   fillConfig();
   if (admin) {
     $id('cfgScript').value = data.script || '';
@@ -162,25 +165,126 @@ async function sendToClient(rowNo) {
 }
 
 /* ---------- Request invoice ---------- */
+// Reimbursement types are built row by row (one bill per row) and can be kept pending until every bill is in.
 
-function openRequest() {
+const isReimb = (type) => /reimburs/i.test(type || '');
+let rq = { draftId: null, items: [] };
+const blankRow = () => ({ date: localToday(), particulars: '', amount: '', link: '' });
+
+function openRequest(draftId) {
+  const draft = draftId ? inv.drafts.find((d) => d.id === draftId) : null;
   $id('rqType').innerHTML = inv.config.invoiceTypes.map((t) => `<option>${esc(t)}</option>`).join('');
   $id('rqClients').innerHTML = inv.clients.filter((c) => !c.onHold).map((c) => `<option value="${esc(c.name)}">`).join('');
   ['rqClient', 'rqPo', 'rqDesc', 'rqAmount', 'rqAttach'].forEach((id) => ($id(id).value = ''));
   $id('rqDate').value = localToday();
   $id('rqNow').checked = false;
+  rq = { draftId: null, items: [blankRow()] };
+  if (draft) {
+    $id('rqType').value = draft.invoiceType;
+    $id('rqClient').value = draft.client;
+    loadDraft(draft);
+  } else showDraftState();
+  requestTypeChanged();
   modal('requestModal').show();
+}
+
+function loadDraft(draft) {
+  rq = { draftId: draft.id, items: draft.items.map((it) => ({ ...it })) };
+  $id('rqPo').value = draft.poNumber;
+  showDraftState(`Continuing the pending request for ${draft.client} (saved ${draft.updatedOn}). Add rows, then save or submit.`);
+}
+
+function showDraftState(note) {
+  $id('rqDraftNote').innerText = note || '';
+  $id('rqDraftNote').classList.toggle('d-none', !note);
+  $id('rqClient').disabled = Boolean(rq.draftId); // a pending request belongs to its client
+  $id('rqDelete').classList.toggle('d-none', !rq.draftId);
+}
+
+function requestTypeChanged() {
+  const reimb = isReimb($id('rqType').value);
+  $id('rqSingle').classList.toggle('d-none', reimb);
+  $id('rqRows').classList.toggle('d-none', !reimb);
+  $id('rqSaveDraft').classList.toggle('d-none', !reimb);
+  $id('rqDesc').required = !reimb;
+  $id('rqAmount').required = !reimb;
+  if (reimb) { requestClientChanged(); renderRequestRows(); }
+}
+
+// Picking a client with a pending reimbursement request continues that request.
+function requestClientChanged() {
+  if (rq.draftId || !isReimb($id('rqType').value)) return;
+  const draft = inv.drafts.find((d) => d.client.toLowerCase() === $id('rqClient').value.trim().toLowerCase());
+  if (draft) { $id('rqType').value = draft.invoiceType; loadDraft(draft); renderRequestRows(); }
+}
+
+function renderRequestRows() {
+  $id('rqItems').innerHTML = `<thead><tr><th style="width:2rem">#</th><th style="width:6.5rem">Added</th><th>Particulars</th><th style="width:9rem">Amount (₹)</th><th>Bill (Google Drive link, optional)</th><th style="width:2rem"></th></tr></thead><tbody>`
+    + rq.items.map((it, n) => `<tr>
+      <td class="text-muted">${n + 1}</td>
+      <td class="text-muted small">${esc(it.date.split('-').reverse().join('/'))}</td>
+      <td><input class="form-control form-control-sm" required maxlength="300" aria-label="Particulars, row ${n + 1}" value="${esc(it.particulars)}" oninput="rq.items[${n}].particulars = this.value"></td>
+      <td><input class="form-control form-control-sm text-end" required type="number" min="0.01" step="0.01" aria-label="Amount, row ${n + 1}" value="${esc(it.amount)}" oninput="rq.items[${n}].amount = this.value; requestTotal()"></td>
+      <td><input class="form-control form-control-sm" type="url" maxlength="500" placeholder="https://drive.google.com/file/d/…" aria-label="Bill link, row ${n + 1}" value="${esc(it.link)}" oninput="rq.items[${n}].link = this.value"></td>
+      <td>${rq.items.length > 1 ? `<button type="button" class="btn btn-light border btn-sm" onclick="rq.items.splice(${n}, 1); renderRequestRows()" aria-label="Remove row ${n + 1}"><i class="fa-solid fa-trash"></i></button>` : ''}</td>
+    </tr>`).join('') + '</tbody>';
+  requestTotal();
+}
+
+function addRequestRow() {
+  rq.items.push(blankRow());
+  renderRequestRows();
+  $id('rqItems').querySelector('tbody tr:last-child input').focus();
+}
+
+function requestTotal() {
+  $id('rqTotal').innerText = formatINR(rq.items.reduce((s, it) => s + (Number(it.amount) || 0), 0));
+}
+
+function requestBody() {
+  const client = inv.clients.find((c) => c.name.toLowerCase() === $id('rqClient').value.trim().toLowerCase());
+  if (!client) { toast('Pick a client from the list (add new clients in the Clients tab)', false); return null; }
+  const base = { invoiceType: $id('rqType').value, client: client.name, invoiceDate: $id('rqDate').value, poNumber: $id('rqPo').value, sendNow: $id('rqNow').checked };
+  if (!isReimb(base.invoiceType)) return { ...base, description: $id('rqDesc').value, amount: $id('rqAmount').value, attachmentUrl: $id('rqAttach').value };
+  return { ...base, draftId: rq.draftId, items: rq.items.map((it) => ({ ...it, amount: Number(it.amount) })) };
+}
+
+function requestDone() {
+  modal('requestModal').hide();
+  loadData();
+  if ($id('manage-tab').classList.contains('active')) loadRows(); else inv.rows = [];
 }
 
 async function submitRequest(e) {
   e.preventDefault();
-  const client = inv.clients.find((c) => c.name.toLowerCase() === $id('rqClient').value.trim().toLowerCase());
-  if (!client) return toast('Pick a client from the list (add new clients in the Clients tab)', false);
+  const request = requestBody();
+  if (!request) return;
   const btn = e.submitter;
   btn.disabled = true;
-  const ok = await invPost({ action: 'request', request: { invoiceType: $id('rqType').value, client: client.name, invoiceDate: $id('rqDate').value, poNumber: $id('rqPo').value, description: $id('rqDesc').value, amount: $id('rqAmount').value, attachmentUrl: $id('rqAttach').value, sendNow: $id('rqNow').checked } }, 'Requested');
+  const ok = await invPost({ action: 'request', request }, 'Requested');
   btn.disabled = false;
-  if (ok) { modal('requestModal').hide(); loadData(); if ($id('manage-tab').classList.contains('active')) loadRows(); else inv.rows = []; }
+  if (ok) requestDone();
+}
+
+async function saveDraftRequest() {
+  if (!$id('requestModal').querySelector('form').reportValidity()) return;
+  const request = requestBody();
+  if (request && await invPost({ action: 'draft', request }, 'Saved as pending')) modal('requestModal').hide();
+}
+
+async function deleteDraft() {
+  if (!confirm('Delete this pending request and all its rows?')) return;
+  if (await invPost({ action: 'deleteDraft', id: rq.draftId }, 'Deleted')) modal('requestModal').hide();
+}
+
+function renderDrafts() {
+  const box = $id('draftsBox');
+  box.classList.toggle('d-none', !inv.drafts.length);
+  box.innerHTML = !inv.drafts.length ? '' : `<div class="fw-semibold small mb-1"><i class="fa-solid fa-hourglass-half"></i> Pending reimbursement requests (not yet sent to the Finance Team)</div>
+    <table class="table align-middle mb-0 small"><tbody>${inv.drafts.map((d) => `<tr>
+      <td style="white-space:normal">${esc(d.client)}</td><td>${d.items.length} row(s)</td>
+      <td class="text-end">${formatINR(d.items.reduce((s, it) => s + it.amount, 0))}</td><td class="text-muted">Saved ${esc(d.updatedOn)}</td>
+      <td class="text-end"><button class="btn btn-primary btn-sm" onclick="openRequest(${d.id})"><i class="fa-solid fa-pen"></i> Continue</button></td></tr>`).join('')}</tbody></table>`;
 }
 
 /* ---------- Clients ---------- */

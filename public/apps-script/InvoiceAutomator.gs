@@ -93,7 +93,7 @@ function iyRow_(x, row, client) {
 }
 
 function iyFill_(template, values) {
-  return Object.keys(values).reduce((html, k) => html.split('{{' + k + '}}').join(iyEsc_(values[k])), template);
+  return Object.keys(values).reduce((html, k) => html.split('{{' + k + '}}').join(iyEsc_(values[k]).replace(/\r?\n/g, '<br>')), template);
 }
 
 /* ---------- webapp actions ---------- */
@@ -122,7 +122,8 @@ function iyList_() {
 function iyRequest_(b) {
   const date = iyDate_(b.invoiceDate);
   if (!date) throw new Error('Invalid invoice date');
-  if (b.attachmentUrl) iyAttachment_(b.attachmentUrl); // checked before any row is written, so a bad link adds nothing
+  const attachments = (b.attachments || []).filter(Boolean);
+  attachments.forEach(iyAttachment_); // checked before any row is written, so a bad link adds nothing
   let req = iyTab_('RequestInvoice');
   if (req.col('attachment') === -1) { // added once, at the end of the row
     req.sh.getRange(1, req.headers.length + 1).setValue('Attachment');
@@ -139,7 +140,7 @@ function iyRequest_(b) {
   put(req.col('ponumber'), b.poNumber || 'N/A');
   put(req.col('amountwithoutgst'), Number(b.amount));
   put(statusCol, 'TO SEND');
-  put(req.col('attachment'), b.attachmentUrl || '');
+  put(req.col('attachment'), attachments.join('\n')); // one Drive link per line
   req.sh.appendRow(row);
   const reqRow = req.sh.getLastRow();
   if (req.col('amountwithoutgst') !== -1) req.sh.getRange(reqRow, req.col('amountwithoutgst') + 1).setNumberFormat('₹#,##0.00');
@@ -260,8 +261,13 @@ function iySendRequestRow_(req, rowNo, config) {
     AmountwithoutGST: iyRupees_(String(get('amountwithoutgst')).replace(/[^0-9.-]+/g, '')), InvoiceDate: iyFmt_(iyDate_(get('invoicedate'))),
   });
   const options = { htmlBody: html, cc: emails.slice(1).join(',') };
-  if (String(get('attachment') || '').trim()) options.attachments = [iyAttachment_(get('attachment'))];
-  GmailApp.sendEmail(emails[0], 'Invoice Request: ' + get('client') + ' ' + get('invoicetype'), 'Please view this email in an HTML-compatible client.', options);
+  const links = String(get('attachment') || '').split(/\s+/).filter(Boolean);
+  if (links.length) options.attachments = links.map(iyAttachment_);
+  try {
+    GmailApp.sendEmail(emails[0], 'Invoice Request: ' + get('client') + ' ' + get('invoicetype'), 'Please view this email in an HTML-compatible client.', options);
+  } catch (err) {
+    throw new Error(err.message + (links.length ? ' (Gmail allows 25 MB of attachments per email.)' : ''));
+  }
   req.sh.getRange(rowNo, req.col('emailstatus') + 1).setValue('SENT');
 }
 

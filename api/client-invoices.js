@@ -4,7 +4,7 @@
 // GET ?key=…            -> the Apps Script: { config, clients }
 // GET                   -> { config, clients, script, key (admin) }
 // GET ?rows=1           -> { rows } from Invoice Extracts
-// POST {action, …}      -> config | client | import | request | update | send | script (admin)
+// POST {action, …}      -> config | client | import | draft | deleteDraft | request | update | send | script (admin)
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
 
@@ -63,6 +63,8 @@ async function readConfig(db) {
   return { ...DEFAULT_CONFIG, ...(raw ? JSON.parse(raw) : {}) };
 }
 const readClients = (db) => db`select id, name, emails, contact, on_hold as "onHold" from clients order by name`;
+const readDrafts = (db) => db`select id, client, invoice_type as "invoiceType", po_number as "poNumber", items,
+                                     to_char(updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn" from reimb_requests order by updated_at desc`;
 
 // Runs one action in the sheet's Apps Script (it reads the config and clients back from /api/client-invoices?key=).
 async function script(db, payload) {
@@ -123,20 +125,34 @@ async function act(db, me, body) {
       if (sheet.config) await setSetting(db, 'invoiceConfig', JSON.stringify(cleanConfig({ ...(await readConfig(db)), ...sheet.config })));
       return { notice: `Imported ${added} new client(s) and the settings.${skipped.length ? ' Skipped: ' + skipped.join('; ') : ''}` };
     }
+    case 'draft':
+      await saveDraft(db, me, body.request || {});
+      return { notice: 'Saved as pending. Add more rows any time, then submit the request.' };
+    case 'deleteDraft':
+      await db`delete from reimb_requests where id = ${idOf(body.id)}`;
+      return { notice: 'Pending request deleted' };
     case 'request': {
       const r = body.request || {};
-      const config = await readConfig(db);
-      const invoiceType = text(r.invoiceType, 50, true);
-      if (!config.invoiceTypes.includes(invoiceType)) throw new Bad('Unknown invoice type');
-      const [client] = await db`select name from clients where name = ${text(r.client, 200, true)}`;
-      if (!client) throw new Bad('Pick a client from the list');
-      const amount = Math.round(Number(r.amount) * 100) / 100;
-      if (!Number.isFinite(amount) || amount <= 0 || amount > 1e10) throw new Bad('Amount must be a number above 0');
+      const { invoiceType, client } = await requestBasics(db, r);
+      let description, amount, attachments, draftId = null;
+      if (Array.isArray(r.items)) {
+        // Reimbursement built row by row: saved first, so the rows are kept if the sheet can't be reached.
+        draftId = await saveDraft(db, me, r);
+        const items = cleanItems(r.items);
+        description = items.map((it) => `${it.particulars} - ${rupees(it.amount)}`).join('\n');
+        amount = Math.round(items.reduce((s, it) => s + it.amount, 0) * 100) / 100;
+        attachments = items.map((it) => it.link).filter(Boolean);
+      } else {
+        description = text(r.description, 1000, true);
+        amount = Math.round(Number(r.amount) * 100) / 100;
+        if (!Number.isFinite(amount) || amount <= 0 || amount > 1e10) throw new Bad('Amount must be a number above 0');
+        attachments = [driveLink(r.attachmentUrl, 'The attachment must be a Google Drive file link')].filter(Boolean);
+      }
       const out = await script(db, {
-        action: 'request', invoiceType, client: client.name, invoiceDate: date(r.invoiceDate), poNumber: text(r.poNumber, 300) || 'N/A',
-        description: text(r.description, 1000, true), amount, sendNow: r.sendNow === true,
-        attachmentUrl: driveLink(r.attachmentUrl, 'The attachment must be a Google Drive file link'),
+        action: 'request', invoiceType, client, invoiceDate: date(r.invoiceDate), poNumber: text(r.poNumber, 300) || 'N/A',
+        description, amount, attachments, sendNow: r.sendNow === true,
       });
+      if (draftId) await db`delete from reimb_requests where id = ${draftId}`; // now in the sheet
       if (out.sendError) return { notice: `Invoice requested, but the Finance Team email failed: ${out.sendError} It is retried every hour; don't request it again.` };
       return { notice: out.sent ? 'Invoice requested and emailed to the Finance Team' : 'Invoice requested. The Finance Team email goes out at the scheduled time.' };
     }
@@ -165,11 +181,59 @@ async function act(db, me, body) {
   throw new Bad('Unknown action');
 }
 
+const rupees = (n) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const todayIST = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10);
+
+async function requestBasics(db, r) {
+  const config = await readConfig(db);
+  const invoiceType = text(r.invoiceType, 50, true);
+  if (!config.invoiceTypes.includes(invoiceType)) throw new Bad('Unknown invoice type');
+  const [client] = await db`select name from clients where name = ${text(r.client, 200, true)}`;
+  if (!client) throw new Bad('Pick a client from the list');
+  return { invoiceType, client: client.name };
+}
+
+// Reimbursement rows: { date (when added), particulars, amount, link (optional Drive bill) }
+export function cleanItems(items, today = todayIST()) {
+  if (!Array.isArray(items) || !items.length) throw new Bad('Add at least one row');
+  if (items.length > 50) throw new Bad('Up to 50 rows per request');
+  return items.map((it, n) => {
+    const particulars = text(it?.particulars, 300);
+    const amount = Math.round(Number(it?.amount) * 100) / 100;
+    if (!particulars || !Number.isFinite(amount) || amount <= 0 || amount > 1e10) throw new Bad(`Row ${n + 1}: add the particulars and an amount above 0`);
+    const d = String(it?.date || '');
+    return { date: DATE.test(d) && d <= today ? d : today, particulars, amount, link: driveLink(it?.link, `Row ${n + 1}: the bill must be a Google Drive file link`) };
+  });
+}
+
+// Saves a pending reimbursement request (one open per client); returns its id.
+async function saveDraft(db, me, r) {
+  const { invoiceType, client } = await requestBasics(db, r);
+  const items = JSON.stringify(cleanItems(r.items));
+  const po = text(r.poNumber, 300);
+  if (r.draftId) {
+    const rows = await db`update reimb_requests set invoice_type = ${invoiceType}, po_number = ${po}, items = ${items}, updated_by = ${me.id}, updated_at = now()
+                          where id = ${idOf(r.draftId)} and lower(client) = lower(${client}) returning id`;
+    if (!rows.length) throw new Bad('That pending request was already submitted or deleted. Refresh the page.');
+    return rows[0].id;
+  }
+  const rows = await db`insert into reimb_requests (client, invoice_type, po_number, items, updated_by) values (${client}, ${invoiceType}, ${po}, ${items}, ${me.id})
+                        on conflict do nothing returning id`;
+  if (!rows.length) throw new Bad(`${client} already has a pending reimbursement request. Continue it from Manage Invoices.`);
+  return rows[0].id;
+}
+
 // Optional Google Drive file link (the Apps Script reads the file by its id).
 function driveLink(v, message) {
   const url = text(v, 500);
   if (url && !/^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/.test(url)) throw new Bad(message);
   return url;
+}
+
+function idOf(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw new Bad('Invalid id');
+  return n;
 }
 
 function rowNo(v) {
@@ -196,7 +260,7 @@ export default async function handler(req, res) {
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const admin = me.role === 'admin';
     return res.status(200).json({
-      config: await readConfig(db), clients: await readClients(db), notice,
+      config: await readConfig(db), clients: await readClients(db), drafts: await readDrafts(db), notice,
       script: admin ? await getSetting(db, 'invoiceScript') : undefined, key: admin ? invoiceToken() : undefined,
     });
   } catch (e) {

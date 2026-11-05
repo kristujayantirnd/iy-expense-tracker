@@ -150,3 +150,16 @@ create table if not exists clients (
   created_at timestamptz not null default now()
 );
 create unique index if not exists clients_name_key on clients (lower(name));
+
+-- Client Invoice Automator: reimbursement invoice requests being put together row by row, one open per client.
+-- Sent to the sheet (and deleted here) when submitted to the Finance Team.
+create table if not exists reimb_requests (
+  id serial primary key,
+  client text not null,
+  invoice_type text not null,
+  po_number text not null default '',
+  items jsonb not null default '[]',
+  updated_by int references users(id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists reimb_requests_client_key on reimb_requests (lower(client));

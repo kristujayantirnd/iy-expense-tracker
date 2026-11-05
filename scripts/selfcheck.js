@@ -41,7 +41,7 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
 
 // Client Invoice Automator: email lists and settings as imported from the sheet's Config tab.
 {
-  const { emailList, cleanConfig } = await import('../api/client-invoices.js');
+  const { emailList, cleanConfig, cleanItems } = await import('../api/client-invoices.js');
   assert.equal(emailList('a@x.com; b@y.in,  c@z.org ;'), 'a@x.com; b@y.in; c@z.org');
   assert.equal(emailList('a@x.com; a@x.com'), 'a@x.com', 'duplicates dropped');
   assert.throws(() => emailList('a@x.com; not-an-email'), /not-an-email/);
@@ -54,6 +54,13 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
   assert.throws(() => cleanConfig({ ...cfg, reminderIntervals: '30,15' }), /increasing/);
   assert.throws(() => cleanConfig({ ...cfg, requestTime: '25:00' }), /time/);
   assert.throws(() => cleanConfig({ ...cfg, invoiceTypes: ' , ' }), /invoice type/);
+  // Reimbursement request rows: particulars + amount required, bill link optional (Drive only), future dates clamp to today.
+  const items = cleanItems([{ particulars: ' Flight ', amount: '52814', date: '2026-11-01' }, { particulars: 'Cab', amount: 702.005, date: '2099-01-01', link: '' }], '2026-11-05');
+  assert.deepEqual(items, [{ date: '2026-11-01', particulars: 'Flight', amount: 52814, link: '' }, { date: '2026-11-05', particulars: 'Cab', amount: 702.01, link: '' }]);
+  assert.throws(() => cleanItems([]), /at least one row/);
+  assert.throws(() => cleanItems([{ particulars: 'Cab', amount: 0 }]), /Row 1/);
+  assert.throws(() => cleanItems([{ particulars: 'Cab', amount: 5, link: 'https://example.com/bill.pdf' }]), /Row 1: the bill/);
+  assert.equal(cleanItems([{ particulars: 'Cab', amount: 5, link: 'https://drive.google.com/file/d/1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1/view' }])[0].link.length > 0, true);
 }
 
 // The Apps Script's date parsing and template filling (run here with a fake time zone).
@@ -67,6 +74,7 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
   assert.equal(iyDate_('06/04/2026').getMonth(), 3, 'dd/mm/yyyy is day first');
   assert.equal(iyDate_('soon'), null);
   assert.equal(iyFill_('Hi {{ContactPoint}}, {{Invoice number}} {{Invoice number}}', { ContactPoint: 'A&B', 'Invoice number': 'VD/1' }), 'Hi A&amp;B, VD/1 VD/1');
+  assert.equal(iyFill_('<td>{{ItemDescription}}</td>', { ItemDescription: 'Flight - ₹52,814.00\nCab - ₹702.00' }), '<td>Flight - ₹52,814.00<br>Cab - ₹702.00</td>', 'one line per row');
   assert.equal(iyFileId_('https://drive.google.com/file/d/1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1/view?usp=drivesdk'), '1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1');
 }
 
