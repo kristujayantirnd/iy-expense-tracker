@@ -13,6 +13,8 @@ const SAMPLE = {
 };
 const ROW_STATUS = { NEW_ENTRY: 'New entry', APPROVED: 'Approved', REMINDER: 'Emailed · reminders on', 'Payment Received': 'Payment received' };
 const $id = (id) => document.getElementById(id);
+// Live search: every typed word must appear somewhere in the row's text (case-insensitive).
+const matches = (inputId, ...fields) => { const words = $id(inputId).value.toLowerCase().split(/\s+/).filter(Boolean); const hay = fields.join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); };
 const isPaid = (r) => r.status.toLowerCase() === 'payment received';
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const modal = (id) => bootstrap.Modal.getOrCreateInstance($id(id));
@@ -85,8 +87,8 @@ async function loadRows() {
 
 function renderManage() {
   const open = $id('manageShow').value === 'open';
-  const list = inv.rows.filter((r) => !open || !isPaid(r)).slice().reverse(); // newest first
-  if (!list.length) { $id('manageTable').innerHTML = '<tr><td class="text-muted py-4 text-center">No invoices to show.</td></tr>'; return; }
+  const list = inv.rows.filter((r) => (!open || !isPaid(r)) && matches('manageSearch', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.status, ROW_STATUS[r.status] || '', r.amount)).slice().reverse(); // newest first
+  if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices match.' : 'No invoices to show.'}</td></tr>`; return; }
   $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice No</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>Due</th><th>PDF</th><th>Status</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
       const link = safeLink(r.pdfUrl);
@@ -166,10 +168,12 @@ async function submitRequest(e) {
 /* ---------- Clients ---------- */
 
 function renderClients() {
+  const list = inv.clients.filter((c) => matches('clientSearch', c.name, c.emails, c.contact, c.onHold ? 'on hold' : 'active'));
   $id('clientsTable').innerHTML = !inv.clients.length
     ? '<tr><td class="text-muted py-4 text-center">No clients yet. The admin can import them from the sheet (Automator Settings).</td></tr>'
+    : !list.length ? '<tr><td class="text-muted py-4 text-center">No clients match your search.</td></tr>'
     : `<thead class="bg-light"><tr><th>Client</th><th>Emails</th><th>Contact</th><th>Status</th><th></th></tr></thead><tbody>`
-      + inv.clients.map((c) => `<tr>
+      + list.map((c) => `<tr>
         <td class="fw-semibold" style="white-space:normal">${esc(c.name)}</td>
         <td style="white-space:normal;word-break:break-word">${esc(c.emails)}</td>
         <td>${esc(c.contact)}</td>
