@@ -135,15 +135,16 @@ async function act(db, me, body) {
       const out = await script(db, {
         action: 'request', invoiceType, client: client.name, invoiceDate: date(r.invoiceDate), poNumber: text(r.poNumber, 300) || 'N/A',
         description: text(r.description, 1000, true), amount, sendNow: r.sendNow === true,
+        attachmentUrl: driveLink(r.attachmentUrl, 'The attachment must be a Google Drive file link'),
       });
+      if (out.sendError) return { notice: `Invoice requested, but the Finance Team email failed: ${out.sendError} It is retried every hour; don't request it again.` };
       return { notice: out.sent ? 'Invoice requested and emailed to the Finance Team' : 'Invoice requested. The Finance Team email goes out at the scheduled time.' };
     }
     case 'update': {
       const u = body.update || {};
       const status = String(u.status || '');
       if (!STATUSES.includes(status)) throw new Bad('Unknown status');
-      const pdfUrl = text(u.pdfUrl, 500);
-      if (pdfUrl && !/^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/.test(pdfUrl)) throw new Bad('Paste the Google Drive link of the invoice PDF');
+      const pdfUrl = driveLink(u.pdfUrl, 'Paste the Google Drive link of the invoice PDF');
       await script(db, {
         action: 'update', row: rowNo(u.row), client: text(u.client, 200, true), invoiceNumber: text(u.invoiceNumber, 50), pdfUrl, status,
         receivedDate: status === 'Payment Received' ? date(u.receivedDate) : '',
@@ -162,6 +163,13 @@ async function act(db, me, body) {
     }
   }
   throw new Bad('Unknown action');
+}
+
+// Optional Google Drive file link (the Apps Script reads the file by its id).
+function driveLink(v, message) {
+  const url = text(v, 500);
+  if (url && !/^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/.test(url)) throw new Bad(message);
+  return url;
 }
 
 function rowNo(v) {

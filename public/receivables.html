@@ -386,6 +386,9 @@
         <div><label class="form-label small fw-semibold" for="rqDate">Invoice date</label><input id="rqDate" type="date" class="form-control" required></div>
         <div><label class="form-label small fw-semibold" for="rqPo">PO number (optional)</label><input id="rqPo" class="form-control" maxlength="300"></div>
         <div><label class="form-label small fw-semibold" for="rqDesc">Item &amp; description</label><textarea id="rqDesc" class="form-control" rows="2" maxlength="1000" required></textarea></div>
+        <div><label class="form-label small fw-semibold" for="rqAttach">Attachment for the Finance Team (Google Drive link, optional)</label>
+          <input id="rqAttach" type="url" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view">
+          <div class="form-text">Attached to the request email. The sheet owner's Google account must be able to open the file.</div></div>
         <div><label class="form-label small fw-semibold" for="rqAmount">Amount without GST (₹)</label><input id="rqAmount" type="number" min="0.01" step="0.01" class="form-control" required></div>
         <label class="d-flex gap-2 small"><input id="rqNow" type="checkbox"> Email the Finance Team now (otherwise at the scheduled time)</label>
       </div>
@@ -622,7 +625,7 @@
               ? `<span class="badge badge-soft badge-soft-overdue ms-1"><i class="fa-solid fa-triangle-exclamation me-1"></i>${overdue}d</span>` : '';
             const link = safeLink(inv.pdfLink);
             const pdfBtn = link
-              ? `<a href="${esc(link)}" target="_blank" rel="noopener" class="btn btn-sm btn-light border py-0 px-2 rounded-2 text-primary"><i class="fa-solid fa-file-pdf me-1"></i>PDF</a>`
+              ? `<button type="button" class="btn btn-sm btn-light border" data-pdf="${esc(link)}" data-title="${esc(`Invoice ${inv.invoiceNumber || ''} · ${client}`)}" onclick="openPdf(this.dataset.pdf, this.dataset.title)"><i class="fa-solid fa-file-pdf"></i> PDF</button>`
               : `<span class="text-muted small">-</span>`;
             return `
               <tr>

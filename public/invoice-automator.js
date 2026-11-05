@@ -57,7 +57,6 @@ async function startAutomator(admin) {
       <div class="form-text">Placeholders: ${t.vars.map((v) => `<code>{{${v}}}</code>`).join(' ')}</div>
     </div>`).join('');
   $id('manage-tab').addEventListener('shown.bs.tab', () => { if (!inv.rows.length) loadRows(); });
-  $id('pdfModal').addEventListener('hidden.bs.modal', () => { $id('pdfFrame').src = 'about:blank'; });
   const res = await fetch('/api/client-invoices');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || 'Could not load the automator settings', false);
@@ -110,15 +109,22 @@ function renderManage() {
     }).join('') + '</tbody>';
 }
 
-// Shows the invoice PDF in a dialog. Drive files use Drive's embeddable viewer (the viewer must have access to the file).
-function previewPdf(rowNo) {
-  const r = inv.rows.find((x) => x.row === rowNo);
-  const link = safeLink(r.pdfUrl);
+// Shows an invoice PDF in a dialog (dashboard tabs and Manage Invoices, every role that sees the page).
+// Drive files use Drive's embeddable viewer, so the viewer must have access to the file.
+function openPdf(url, title) {
+  const link = safeLink(url);
+  if (!link) return;
   const id = (link.match(/\/d\/([-\w]{25,})/) || link.match(/[?&]id=([-\w]{25,})/) || [])[1];
-  $id('pdfTitle').innerText = `Invoice ${r.invoiceNumber || ''} · ${r.client}`;
+  $id('pdfTitle').innerText = title;
   $id('pdfFrame').src = id ? `https://drive.google.com/file/d/${id}/preview` : link;
   $id('pdfOpen').href = link;
   modal('pdfModal').show();
+}
+$id('pdfModal').addEventListener('hidden.bs.modal', () => { $id('pdfFrame').src = 'about:blank'; }); // stop loading once closed
+
+function previewPdf(rowNo) {
+  const r = inv.rows.find((x) => x.row === rowNo);
+  openPdf(r.pdfUrl, `Invoice ${r.invoiceNumber || ''} · ${r.client}`);
 }
 
 let editingRow = null;
@@ -160,7 +166,7 @@ async function sendToClient(rowNo) {
 function openRequest() {
   $id('rqType').innerHTML = inv.config.invoiceTypes.map((t) => `<option>${esc(t)}</option>`).join('');
   $id('rqClients').innerHTML = inv.clients.filter((c) => !c.onHold).map((c) => `<option value="${esc(c.name)}">`).join('');
-  ['rqClient', 'rqPo', 'rqDesc', 'rqAmount'].forEach((id) => ($id(id).value = ''));
+  ['rqClient', 'rqPo', 'rqDesc', 'rqAmount', 'rqAttach'].forEach((id) => ($id(id).value = ''));
   $id('rqDate').value = localToday();
   $id('rqNow').checked = false;
   modal('requestModal').show();
@@ -172,7 +178,7 @@ async function submitRequest(e) {
   if (!client) return toast('Pick a client from the list (add new clients in the Clients tab)', false);
   const btn = e.submitter;
   btn.disabled = true;
-  const ok = await invPost({ action: 'request', request: { invoiceType: $id('rqType').value, client: client.name, invoiceDate: $id('rqDate').value, poNumber: $id('rqPo').value, description: $id('rqDesc').value, amount: $id('rqAmount').value, sendNow: $id('rqNow').checked } }, 'Requested');
+  const ok = await invPost({ action: 'request', request: { invoiceType: $id('rqType').value, client: client.name, invoiceDate: $id('rqDate').value, poNumber: $id('rqPo').value, description: $id('rqDesc').value, amount: $id('rqAmount').value, attachmentUrl: $id('rqAttach').value, sendNow: $id('rqNow').checked } }, 'Requested');
   btn.disabled = false;
   if (ok) { modal('requestModal').hide(); loadData(); if ($id('manage-tab').classList.contains('active')) loadRows(); else inv.rows = []; }
 }

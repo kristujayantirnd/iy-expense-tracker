@@ -122,7 +122,12 @@ function iyList_() {
 function iyRequest_(b) {
   const date = iyDate_(b.invoiceDate);
   if (!date) throw new Error('Invalid invoice date');
-  const req = iyTab_('RequestInvoice');
+  if (b.attachmentUrl) iyAttachment_(b.attachmentUrl); // checked before any row is written, so a bad link adds nothing
+  let req = iyTab_('RequestInvoice');
+  if (req.col('attachment') === -1) { // added once, at the end of the row
+    req.sh.getRange(1, req.headers.length + 1).setValue('Attachment');
+    req = iyTab_('RequestInvoice');
+  }
   const statusCol = req.col('emailstatus');
   if (statusCol === -1) throw new Error('RequestInvoice has no "Email Status" column');
   const row = new Array(req.headers.length).fill('');
@@ -134,6 +139,7 @@ function iyRequest_(b) {
   put(req.col('ponumber'), b.poNumber || 'N/A');
   put(req.col('amountwithoutgst'), Number(b.amount));
   put(statusCol, 'TO SEND');
+  put(req.col('attachment'), b.attachmentUrl || '');
   req.sh.appendRow(row);
   const reqRow = req.sh.getLastRow();
   if (req.col('amountwithoutgst') !== -1) req.sh.getRange(reqRow, req.col('amountwithoutgst') + 1).setNumberFormat('₹#,##0.00');
@@ -157,8 +163,13 @@ function iyRequest_(b) {
   x.sh.getRange(extRow, x.c.due + 1).setNumberFormat('dd/mm/yyyy');
 
   if (!b.sendNow) return { sent: false };
-  iySendRequestRow_(req, reqRow, iySetup_().config);
-  return { sent: true };
+  // The rows are saved either way; a failed email stays TO SEND and the hourly timer retries it.
+  try {
+    iySendRequestRow_(req, reqRow, iySetup_().config);
+    return { sent: true };
+  } catch (err) {
+    return { sent: false, sendError: String(err.message || err) };
+  }
 }
 
 function iyUpdate_(b) {
@@ -203,6 +214,17 @@ function iySendClient_(b) {
 
 /* ---------- timers ---------- */
 
+// The Drive file behind a link, as an email attachment.
+function iyAttachment_(url) {
+  const id = iyFileId_(url);
+  if (!id) throw new Error('The attachment link is not a Google Drive file link');
+  try {
+    return DriveApp.getFileById(id).getBlob();
+  } catch (e) {
+    throw new Error('Cannot open the attachment in Google Drive. Check the link and that the sheet owner has access to the file.');
+  }
+}
+
 // Hourly: emails the Finance Team for each RequestInvoice row not yet SENT once its scheduled time has come.
 function iyRequestEmails() {
   const config = iySetup_().config;
@@ -218,7 +240,12 @@ function iyRequestEmails() {
     const when = new Date(date.getTime());
     when.setDate(when.getDate() - (Number(config.requestDaysBefore) || 0));
     when.setHours(hour, minute, 0, 0);
-    if (now >= when) iySendRequestRow_(req, i + 1, config);
+    if (now < when) continue;
+    try {
+      iySendRequestRow_(req, i + 1, config);
+    } catch (err) {
+      Logger.log('RequestInvoice row ' + (i + 1) + ': not sent: ' + err.message); // the other rows still go out
+    }
   }
 }
 
@@ -232,8 +259,9 @@ function iySendRequestRow_(req, rowNo, config) {
     InvoiceType: get('invoicetype'), Client: get('client'), PO_Number: get('ponumber') || 'N/A', ItemDescription: get('itemdescription'),
     AmountwithoutGST: iyRupees_(String(get('amountwithoutgst')).replace(/[^0-9.-]+/g, '')), InvoiceDate: iyFmt_(iyDate_(get('invoicedate'))),
   });
-  GmailApp.sendEmail(emails[0], 'Invoice Request: ' + get('client') + ' ' + get('invoicetype'), 'Please view this email in an HTML-compatible client.',
-    { htmlBody: html, cc: emails.slice(1).join(',') });
+  const options = { htmlBody: html, cc: emails.slice(1).join(',') };
+  if (String(get('attachment') || '').trim()) options.attachments = [iyAttachment_(get('attachment'))];
+  GmailApp.sendEmail(emails[0], 'Invoice Request: ' + get('client') + ' ' + get('invoicetype'), 'Please view this email in an HTML-compatible client.', options);
   req.sh.getRange(rowNo, req.col('emailstatus') + 1).setValue('SENT');
 }
 
