@@ -164,6 +164,14 @@
     .table { --bs-table-hover-bg: #fafafa; }
     .table th, .dashboard-table th { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #484848; background: transparent; }
     .table td { font-size: .875rem; border-color: #e5e7eb; }
+    /* Manage Invoices: reimbursement rows green, client/service rows purple */
+    #manageTable tr.inv-reimb { --bs-table-bg: #f0fdf4; --bs-table-hover-bg: #dcfce7; }
+    #manageTable tr.inv-service { --bs-table-bg: #faf5fc; --bs-table-hover-bg: #f3e8f8; }
+    #manageTable tr.inv-reimb > td:first-child { box-shadow: inset 4px 0 0 #16a34a; }
+    #manageTable tr.inv-service > td:first-child { box-shadow: inset 4px 0 0 #680087; }
+    .badge-type-reimb { background: #dcfce7; color: #166534; }
+    .badge-type-service { background: #f3e8f8; color: #550070; }
+    .type-swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: -1px; }
     .accordion-button:focus { box-shadow: 0 0 0 3px rgba(104, 0, 135, .15); }
     .accordion-button:not(.collapsed) { color: #1a1a1a; }
     .accordion-header { font-family: inherit; }
@@ -319,6 +327,10 @@
             </div>
           </div>
           <div id="draftsBox" class="mb-3 d-none"></div>
+          <div class="small text-muted mb-2 d-flex gap-3 flex-wrap" aria-hidden="true">
+            <span><span class="type-swatch" style="background:#16a34a"></span> Reimbursement invoice</span>
+            <span><span class="type-swatch" style="background:#680087"></span> Client / service invoice</span>
+          </div>
           <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="manageTable"></table></div>
         </div>
       </div>
@@ -434,10 +446,12 @@
       <div class="modal-header"><h2 class="modal-title h5" id="rowTitle">Update invoice</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
       <div class="modal-body d-grid gap-3">
         <p class="small text-muted mb-0" id="rowInfo"></p>
+        <div id="rwDraftNote" class="alert alert-info small py-2 mb-0 d-none"><i class="fa-solid fa-pen-ruler me-1"></i>Showing the draft saved by <span id="rwDraftBy"></span>. It isn't in the sheet yet.
+          <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="discardRowDraft()">Discard draft</button></div>
         <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…" oninput="rowReadiness()"></div>
         <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" oninput="rowReadiness()"></div>
         <div><label class="form-label small fw-semibold" for="rwGst">Amount with GST (₹)</label><input id="rwGst" type="number" min="0.01" step="0.01" class="form-control" oninput="rowReadiness()">
-          <div class="form-text">Amount to be received (saved to Amt(ToBeReceived)): <b id="rwToReceive">-</b> <span class="text-muted">= amount with GST − 10% TDS on <span id="rwBase"></span> (amount w/o GST)</span><span id="rwSheetNote" class="text-warning"></span></div></div>
+          <div class="form-text">Amount to be received (saved to Amt(ToBeReceived)): <b id="rwToReceive">-</b> <span class="text-muted" id="rwFormula">= amount with GST − 10% TDS on <span id="rwBase"></span> (amount w/o GST)</span><span id="rwSheetNote" class="text-warning"></span></div></div>
         <div><label class="form-label small fw-semibold" for="rwStatus">Status</label>
           <select id="rwStatus" class="form-select" onchange="toggleReceived(); rowReadiness()">
             <option value="NEW_ENTRY">New entry</option><option value="APPROVED">Approved (ready to email)</option>
@@ -446,7 +460,9 @@
           <div class="form-text" id="rwReadyHint">Fill in the invoice number, PDF link and amount with GST to choose Approved or Emailed.</div></div>
         <div id="rwReceivedBox"><label class="form-label small fw-semibold" for="rwReceived">Payment received on</label><input id="rwReceived" type="date" class="form-control"></div>
       </div>
-      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Save to sheet</button></div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-light border fw-semibold" onclick="saveRowDraft(this)" title="Keep these details in the app without changing the sheet"><i class="fa-solid fa-floppy-disk me-1"></i>Save as draft</button>
+        <button class="btn btn-primary fw-semibold">Save to sheet</button></div>
     </form></div>
   </div>
 

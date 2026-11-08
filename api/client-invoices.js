@@ -4,7 +4,8 @@
 // GET ?key=…            -> the Apps Script: { config, clients }
 // GET                   -> { config, clients, script, key (admin) }
 // GET ?rows=1           -> { rows } from Invoice Extracts
-// POST {action, …}      -> config | client | import | draft | deleteDraft | request | update | send | script (admin)
+// POST {action, …}      -> config | client | import | draft | deleteDraft | request | rowDraft | deleteRowDraft | update | send | script (admin)
+// Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
 
@@ -63,6 +64,15 @@ async function readConfig(db) {
   return { ...DEFAULT_CONFIG, ...(raw ? JSON.parse(raw) : {}) };
 }
 const readClients = (db) => db`select id, name, emails, contact, on_hold as "onHold" from clients order by name`;
+// Drafts of the Update invoice dialog, keyed by sheet row + client + invoice date so a re-sorted sheet can't
+// attach a draft to another invoice. Written with jsonb merge/delete so two people never overwrite each other's drafts.
+const ROW_DRAFTS = 'invoiceRowDrafts';
+const rowDraftKey = (u) => `${rowNo(u.row)}|${text(u.client, 200, true).toLowerCase()}|${text(u.invoiceDateIso, 10)}`;
+async function readRowDrafts(db) {
+  const raw = await getSetting(db, ROW_DRAFTS);
+  return raw ? JSON.parse(raw) : {};
+}
+const dropRowDraft = (db, key) => db`update settings set value = (value::jsonb - ${key}::text)::text where key = ${ROW_DRAFTS}`;
 const readDrafts = (db) => db`select id, client, invoice_type as "invoiceType", po_number as "poNumber", items,
                                      to_char(updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn" from reimb_requests order by updated_at desc`;
 
@@ -156,6 +166,24 @@ async function act(db, me, body) {
       if (out.sendError) return { notice: `Invoice requested, but the Finance Team email failed: ${out.sendError} It is retried every hour; don't request it again.` };
       return { notice: out.sent ? 'Invoice requested and emailed to the Finance Team' : 'Invoice requested. The Finance Team email goes out at the scheduled time.' };
     }
+    case 'rowDraft': {
+      // Partial details are fine here; the completeness checks run when it is saved to the sheet.
+      const u = body.update || {};
+      const withGst = u.withGst === '' || u.withGst == null ? null : Math.round(Number(u.withGst) * 100) / 100;
+      if (withGst !== null && (!Number.isFinite(withGst) || withGst <= 0 || withGst > 1e10)) throw new Bad('Amount with GST must be a number above 0');
+      const status = STATUSES.includes(String(u.status)) ? String(u.status) : 'NEW_ENTRY';
+      const draft = {
+        invoiceNumber: text(u.invoiceNumber, 50), pdfUrl: text(u.pdfUrl, 500), withGst, status,
+        receivedDate: DATE.test(String(u.receivedDate || '')) ? u.receivedDate : '',
+        by: me.name || me.email, on: new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }),
+      };
+      const entry = JSON.stringify({ [rowDraftKey(u)]: draft });
+      await db`insert into settings (key, value) values (${ROW_DRAFTS}, ${entry}) on conflict (key) do update set value = (settings.value::jsonb || excluded.value::jsonb)::text`;
+      return { notice: 'Saved as draft. The sheet is unchanged until you save it to the sheet.' };
+    }
+    case 'deleteRowDraft':
+      await dropRowDraft(db, rowDraftKey(body.update || {}));
+      return { notice: 'Draft discarded' };
     case 'update': {
       const u = body.update || {};
       const status = String(u.status || '');
@@ -170,6 +198,7 @@ async function act(db, me, body) {
         action: 'update', row: rowNo(u.row), client: text(u.client, 200, true), invoiceNumber, pdfUrl, withGst, status,
         receivedDate: status === 'Payment Received' ? date(u.receivedDate) : '',
       });
+      await dropRowDraft(db, rowDraftKey(u)); // now in the sheet
       return { notice: 'Invoice updated in the sheet' };
     }
     case 'send':
@@ -270,7 +299,7 @@ export default async function handler(req, res) {
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const admin = me.role === 'admin';
     return res.status(200).json({
-      config: await readConfig(db), clients: await readClients(db), drafts: await readDrafts(db), notice,
+      config: await readConfig(db), clients: await readClients(db), drafts: await readDrafts(db), rowDrafts: await readRowDrafts(db), notice,
       script: admin ? await getSetting(db, 'invoiceScript') : undefined, key: admin ? invoiceToken() : undefined,
     });
   } catch (e) {

@@ -25,8 +25,8 @@ Every login is an employee: it has a salary and profile, raises its own invoices
 
 | Role | Extra access |
 |---|---|
-| Admin | Everything: expense tracker, employer details, logins & salaries, approve/reject invoices, payout register |
-| Management | Lands on the expense tracker after signing in. Views all invoices, the payout register and Employees Salary (salary history); exports CSV/PDF |
+| Admin | Everything: Employee Dashboard, employer details, logins & salaries, approve/reject invoices, payout register |
+| Management | Lands on the Employee Dashboard after signing in. Views all invoices, the payout register and Employees Salary (salary history); exports CSV/PDF |
 | Employee | None: Payouts page only, own profile and invoices |
 
 **Salary revisions:** changing a login's salary asks for the date it takes effect (and an optional note) and is kept in **Salary History** (the **Employees Salary** tab, for Admin and Management). Salary invoices use the salary in effect on the invoice date; the tracker and the logins list show today's salary (with any upcoming one). Each login gets a starting record the first time `setup-db` runs.
@@ -43,7 +43,7 @@ Each login is **Active** or **Inactive** (Logins & Salaries → Edit). An inacti
 - Admin approves (invoice is then locked) or rejects with a reason (employee can edit and resubmit).
 - Each reimbursement row can carry an optional **expense category** (the tracker's categories). The admin approves through **Review**, which shows each row's bill and lets them change each row's category. The admin can also raise salary invoices for any employee.
 - **Cancel** an approved invoice (worst cases) in *Settings*, with a reason: it leaves the payout register, keeps its number, frees that salary month, deletes its uploaded bill files (unless another live invoice uses them) and moves its Drive copy to Drive's trash. Cancelled invoices are hidden from the list unless the Cancelled filter is picked.
-- The Expense Tracker's **Direct Expenses** tab lists categorised reimbursement rows (pending, approved, submitted, paid) in a date range, current month by default. They are listed only, not added to the tracker's totals or budgets.
+- The Employee Dashboard's **Direct Expenses** tab lists categorised reimbursement rows (pending, approved, submitted, paid) in a date range, current month by default. They are listed only, not added to the tracker's totals or budgets.
 - **Receivables** module (`/receivables.html`, Admin, Management and Finance Admin): the company's invoice & receivables Google Sheet, read through its Apps Script (`getDashboardData`) via a key-protected data link (Settings → Receivables). The sheet stays the backend.
 - The invoice list shows 8 per page, with one search box for invoice number, type or employee name.
 - After approval the admin sets **Submitted** → **Payment Completed** (dropdown on the invoice; still counts as approved).

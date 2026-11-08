@@ -7,7 +7,8 @@ const APP_KEY = '__KEY__';
 const DUE_DAYS = 45; // Due Date = Invoice Date + 45 days
 const TDS_RATE = 0.1;
 // Amt(ToBeReceived) = Amount with GST - 10% TDS on the amount without GST (matches the existing rows, e.g. 4,13,000 - 35,000).
-const iyToBeReceived_ = (withGst, withoutGst) => Math.round((withGst - TDS_RATE * withoutGst) * 100) / 100;
+// Reimbursement invoices carry no TDS, so for them it is the amount with GST.
+const iyToBeReceived_ = (withGst, withoutGst, reimb) => Math.round((reimb ? withGst : withGst - TDS_RATE * withoutGst) * 100) / 100;
 const REMINDER_TAG = 'GAS_INV_REMINDER';
 const REMINDER_MARKER = '<span style="display:none;" class="gas-inv-reminder-tag">' + REMINDER_TAG + '</span>';
 
@@ -186,7 +187,8 @@ function iyUpdate_(b) {
   if (b.withGst) { // left as is when not given
     cell(x.c.withGst).setValue(Number(b.withGst)).setNumberFormat('₹#,##0.00');
     const withoutGst = Number(String(v[x.c.amount]).replace(/[^0-9.-]+/g, '')) || 0;
-    cell(x.c.toReceive).setValue(iyToBeReceived_(Number(b.withGst), withoutGst)).setNumberFormat('₹#,##0.00');
+    const reimb = /reimburs/i.test(String(v[x.c.type] || ''));
+    cell(x.c.toReceive).setValue(iyToBeReceived_(Number(b.withGst), withoutGst, reimb)).setNumberFormat('₹#,##0.00');
   }
   cell(x.c.status).setValue(b.status);
   if (b.status === 'Payment Received') cell(x.c.received).setValue(iyDate_(b.receivedDate)).setNumberFormat('dd/mm/yyyy');

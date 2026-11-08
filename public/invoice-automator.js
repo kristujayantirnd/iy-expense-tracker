@@ -1,6 +1,6 @@
 // Client Invoice Automator on the Receivables page (Admin and Finance Admin only).
 // Talks to /api/client-invoices; the sheet rows and Gmail are reached through the sheet's Apps Script.
-let inv = { config: null, clients: [], drafts: [], rows: [], admin: false };
+let inv = { config: null, clients: [], drafts: [], rowDrafts: {}, rows: [], admin: false };
 
 const TEMPLATES = [
   { key: 'requestTemplate', label: 'Finance Team request email', vars: ['InvoiceType', 'Client', 'PO_Number', 'ItemDescription', 'AmountwithoutGST', 'InvoiceDate'] },
@@ -16,6 +16,11 @@ const $id = (id) => document.getElementById(id);
 // Live search: every typed word must appear somewhere in the row's text (case-insensitive).
 const matches = (inputId, ...fields) => { const words = $id(inputId).value.toLowerCase().split(/\s+/).filter(Boolean); const hay = fields.join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); };
 const isPaid = (r) => r.status.toLowerCase() === 'payment received';
+// Invoice Extracts' type column says "...reimbursement of the expenses incurred." for reimbursement invoices.
+const isReimbRow = (r) => /reimburs/i.test(r.invoiceType || '');
+// Same key as the server's rowDraftKey: sheet row + client + invoice date.
+const rowDraftKey = (r) => `${r.row}|${r.client.toLowerCase()}|${r.invoiceDateIso || ''}`;
+const rowDraftOf = (r) => inv.rowDrafts[rowDraftKey(r)];
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const modal = (id) => bootstrap.Modal.getOrCreateInstance($id(id));
 
@@ -36,6 +41,7 @@ async function invPost(body, done) {
     inv.config = data.config;
     inv.clients = data.clients;
     inv.drafts = data.drafts;
+    inv.rowDrafts = data.rowDrafts || {};
     renderDrafts();
     toast(data.notice || done);
     return data;
@@ -62,7 +68,8 @@ async function startAutomator(admin) {
   const res = await fetch('/api/client-invoices');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || 'Could not load the automator settings', false);
-  Object.assign(inv, { config: data.config, clients: data.clients, drafts: data.drafts });
+  Object.assign(inv, { config: data.config, clients: data.clients, drafts: data.drafts, rowDrafts: data.rowDrafts || {} });
+  if (inv.rows.length) renderManage();
   renderClients();
   renderDrafts();
   fillConfig();
@@ -90,21 +97,24 @@ async function loadRows() {
 
 function renderManage() {
   const open = $id('manageShow').value === 'open';
-  const list = inv.rows.filter((r) => (!open || !isPaid(r)) && matches('manageSearch', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.status, ROW_STATUS[r.status] || '', r.amount)).slice().reverse(); // newest first
+  const list = inv.rows.filter((r) => (!open || !isPaid(r)) && matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.status, ROW_STATUS[r.status] || '', r.amount)).slice().reverse(); // newest first
   if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices match.' : 'No invoices to show.'}</td></tr>`; return; }
   $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice No</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>Due</th><th>PDF</th><th>Status</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
       const link = safeLink(r.pdfUrl);
       const ready = ['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase()) && r.invoiceNumber && link && r.withGst > 0;
-      return `<tr>
-        <td style="white-space:normal;min-width:12rem">${esc(r.client)}</td>
+      const reimb = isReimbRow(r);
+      return `<tr class="${reimb ? 'inv-reimb' : 'inv-service'}">
+        <td style="white-space:normal;min-width:12rem">${esc(r.client)}
+          <div><span class="badge badge-soft ${reimb ? 'badge-type-reimb' : 'badge-type-service'}" style="font-size:10px">${reimb ? 'Reimbursement' : 'Service'}</span></div></td>
         <td class="fw-semibold">${esc(r.invoiceNumber) || '<span class="text-muted">-</span>'}</td>
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
         <td>${esc(r.dueDate)}</td>
         <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}</td>
         <td><span class="badge badge-soft ${isPaid(r) ? 'badge-soft-received' : 'badge-soft-pending'}">${esc(ROW_STATUS[r.status] || r.status || '-')}</span>
-          ${isPaid(r) && r.receivedDate ? `<div class="text-muted" style="font-size:11px">${esc(r.receivedDate)}</div>` : ''}</td>
+          ${isPaid(r) && r.receivedDate ? `<div class="text-muted" style="font-size:11px">${esc(r.receivedDate)}</div>` : ''}
+          ${rowDraftOf(r) ? `<div><span class="badge badge-soft badge-soft-upcoming mt-1" title="Draft by ${esc(rowDraftOf(r).by)} on ${esc(rowDraftOf(r).on)}, not yet in the sheet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span></div>` : ''}</td>
         <td class="text-end text-nowrap">
           <button class="btn btn-light border btn-sm" onclick="openRow(${r.row})"><i class="fa-solid fa-pen"></i> Update</button>
           ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${r.row})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
@@ -133,12 +143,15 @@ function previewPdf(rowNo) {
 let editingRow = null;
 function openRow(rowNo) {
   editingRow = inv.rows.find((r) => r.row === rowNo);
+  const d = rowDraftOf(editingRow); // a saved draft takes the place of the sheet's values
   $id('rowInfo').innerText = `${editingRow.client} · invoice date ${editingRow.invoiceDate} · ${formatINR(editingRow.amount)}`;
-  $id('rwNumber').value = editingRow.invoiceNumber;
-  $id('rwPdf').value = editingRow.pdfUrl;
-  $id('rwGst').value = editingRow.withGst || '';
-  $id('rwStatus').value = Object.keys(ROW_STATUS).find((s) => s.toLowerCase() === editingRow.status.toLowerCase()) || 'NEW_ENTRY';
-  $id('rwReceived').value = editingRow.receivedDateIso || localToday();
+  $id('rwDraftNote').classList.toggle('d-none', !d);
+  if (d) $id('rwDraftBy').innerText = `${d.by} on ${d.on}`;
+  $id('rwNumber').value = d ? d.invoiceNumber : editingRow.invoiceNumber;
+  $id('rwPdf').value = d ? d.pdfUrl : editingRow.pdfUrl;
+  $id('rwGst').value = (d ? d.withGst : editingRow.withGst) || '';
+  $id('rwStatus').value = d ? d.status : Object.keys(ROW_STATUS).find((s) => s.toLowerCase() === editingRow.status.toLowerCase()) || 'NEW_ENTRY';
+  $id('rwReceived').value = (d && d.receivedDate) || editingRow.receivedDateIso || localToday();
   toggleReceived();
   rowReadiness();
   modal('rowModal').show();
@@ -147,7 +160,8 @@ function openRow(rowNo) {
 // Approved / Emailed need the invoice number, the PDF link and the amount with GST (checked again on the server).
 const NEEDS_DETAILS = ['APPROVED', 'REMINDER'];
 // Preview only; the sheet script saves the same figure from the row's own amount (keep in step with iyToBeReceived_).
-const toBeReceived = (withGst, withoutGst) => Math.round((withGst - 0.1 * withoutGst) * 100) / 100;
+// Reimbursement invoices carry no TDS: the amount to be received is the amount with GST.
+const toBeReceived = (withGst, withoutGst, reimb) => Math.round((reimb ? withGst : withGst - 0.1 * withoutGst) * 100) / 100;
 const DRIVE_LINK = /^https:\/\/(drive|docs)\.google\.com\/.*[-\w]{25,}/;
 function rowMissing() {
   return [
@@ -158,8 +172,10 @@ function rowMissing() {
 }
 function rowReadiness() {
   const gst = Number($id('rwGst').value);
-  $id('rwBase').innerText = formatINR(editingRow.amount);
-  const calc = gst > 0 ? toBeReceived(gst, editingRow.amount) : 0;
+  const reimb = isReimbRow(editingRow);
+  $id('rwFormula').innerHTML = reimb ? '= amount with GST (reimbursement invoice, no TDS)'
+    : `= amount with GST − 10% TDS on <span id="rwBase">${formatINR(editingRow.amount)}</span> (amount w/o GST)`;
+  const calc = gst > 0 ? toBeReceived(gst, editingRow.amount, reimb) : 0;
   // Opened unchanged: show what the sheet holds, and flag it if saving would change it.
   const sheet = gst > 0 && gst === editingRow.withGst ? editingRow.toReceive : 0;
   $id('rwToReceive').innerText = gst > 0 ? formatINR(calc) : '-';
@@ -184,9 +200,25 @@ async function saveRow(e) {
   if (NEEDS_DETAILS.includes($id('rwStatus').value) && missing.length) return toast(`Add the ${missing.join(', ')} before choosing this status`, false);
   const btn = e.submitter;
   btn.disabled = true;
-  const ok = await invPost({ action: 'update', update: { row: editingRow.row, client: editingRow.client, invoiceNumber: $id('rwNumber').value, pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value } }, 'Saved');
+  const ok = await invPost({ action: 'update', update: rowForm() }, 'Saved');
   btn.disabled = false;
   if (ok) { modal('rowModal').hide(); loadRows(); loadData(); }
+}
+
+const rowForm = () => ({ row: editingRow.row, client: editingRow.client, invoiceDateIso: editingRow.invoiceDateIso || '', invoiceNumber: $id('rwNumber').value,
+  pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value });
+
+// Keeps what is filled in so far in the app only; the sheet row is untouched until Save to sheet.
+async function saveRowDraft(btn) {
+  btn.disabled = true;
+  const ok = await invPost({ action: 'rowDraft', update: rowForm() }, 'Draft saved');
+  btn.disabled = false;
+  if (ok) { modal('rowModal').hide(); renderManage(); }
+}
+
+async function discardRowDraft() {
+  if (!confirm('Discard this draft? The form goes back to what the sheet has.')) return;
+  if (await invPost({ action: 'deleteRowDraft', update: rowForm() }, 'Draft discarded')) { renderManage(); openRow(editingRow.row); }
 }
 
 async function sendToClient(rowNo) {
