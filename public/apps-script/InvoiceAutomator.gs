@@ -317,7 +317,12 @@ function iySaveMerged_(b) {
   const folder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
   const name = base.getName().replace(/\.pdf$/i, '') + ' - with bills.pdf';
   const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b.data), 'application/pdf', name));
-  try { file.setSharing(base.getSharingAccess(), base.getSharingPermission()); } catch (e) { /* folder sharing still applies */ }
+  // Anyone with the link can view, so the client and the webapp's PDF preview can open it.
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (e) {
+    throw new Error('The PDF with the bills was saved in Drive (' + file.getUrl() + ') but could not be shared as "Anyone with the link can view": ' + e.message);
+  }
   if (iyHasBills_(x, v)) { try { DriveApp.getFileById(iyFileId_(v[x.c.withBills])).setTrashed(true); } catch (e) { /* already gone */ } }
   x.sh.getRange(b.row, iyExtraCol_(x, 'Invoice Without Bills') + 1).setValue('https://drive.google.com/file/d/' + b.baseId + '/view');
   x.sh.getRange(b.row, iyExtraCol_(x, 'Invoice With Bills') + 1).setValue(file.getUrl());

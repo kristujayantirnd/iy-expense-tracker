@@ -3,7 +3,7 @@
 function renderModules(el, { role, ptLinked, extraRoles = [], current }) {
   const staff = role === 'admin' || role === 'management';
   const mods = [
-    { key: 'tracker', label: 'Employee Dashboard', href: '/', icon: 'fa-chart-pie', show: staff },
+    { key: 'tracker', label: 'Expense Dashboard', href: '/', icon: 'fa-chart-pie', show: staff },
     { key: 'payouts', label: 'Invoicing', href: '/payouts.html', icon: 'fa-file-invoice', show: true },
     { key: 'projects', label: 'Project Tracker', href: '/projects.html', icon: 'fa-diagram-project', show: staff || ptLinked },
     { key: 'receivables', label: 'Receivables', href: '/receivables.html', icon: 'fa-hand-holding-dollar', show: staff || extraRoles.includes('finance_admin') },

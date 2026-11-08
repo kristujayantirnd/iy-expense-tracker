@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Invincible YOU · Employee Dashboard</title>
+  <title>Invincible YOU · Expense Dashboard</title>
   <link rel="icon" href="/iy-lockup.png">
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -94,22 +94,11 @@
 
         <!-- Right Controls -->
         <div class="flex items-center space-x-2 sm:space-x-3 flex-shrink-0">
-          <!-- Currency Selector -->
-          <div class="flex items-center bg-slate-800 border border-slate-700 rounded-lg px-2 py-1">
-            <span class="hidden sm:inline text-xs text-slate-400 mr-2 font-medium">Currency:</span>
-            <select id="currencySelector" onchange="changeCurrency(this.value)" class="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none cursor-pointer">
-              <option value="INR" class="bg-slate-900">₹ INR</option>
-              <option value="USD" class="bg-slate-900">$ USD</option>
-              <option value="EUR" class="bg-slate-900">€ EUR</option>
-              <option value="GBP" class="bg-slate-900">£ GBP</option>
-            </select>
-          </div>
-
           <!-- Module switcher (public/modules.js): only the modules this person may open -->
           <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 border border-slate-700 rounded-lg p-1"></nav>
 
           <!-- Executive Report Button -->
-          <button onclick="openExecutiveReportModal()" title="Executive Report" aria-label="Executive Report" class="px-3 py-1.5 rounded-lg text-xs font-medium bg-[#cc0000] hover:bg-[#a30000] text-white transition flex items-center gap-1.5 shadow-sm shadow-red-900/20">
+          <button onclick="openExecutiveReportModal()" title="Executive Report" aria-label="Executive Report" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-slate-100 hover:bg-slate-800 border border-slate-700 transition flex items-center gap-1.5">
             <i class="fa-solid fa-file-contract"></i>
             <span class="hidden sm:inline">Executive Report</span>
           </button>
@@ -687,12 +676,7 @@
       expenses: []
     };
 
-    let currencySymbols = {
-      INR: '₹',
-      USD: '$',
-      EUR: '€',
-      GBP: '£'
-    };
+    const CURRENCY_SYMBOL = '₹'; // amounts are in rupees (the currency picker was removed)
 
     // Chart instances
     let doughnutChart = null;
@@ -727,7 +711,6 @@
 
     function applyState(data) {
       state = data;
-      document.getElementById('currencySelector').value = state.currency;
       document.getElementById('currentUser').innerText = data.user || '';
       renderModules(document.getElementById('moduleNav'), { role: data.role, ptLinked: data.ptLinked, current: 'tracker' });
       renderAllViews();
@@ -804,16 +787,8 @@
       showLogin();
     }
 
-    async function changeCurrency(val) {
-      if (await saveItem('currency', val)) {
-        showToast(`Currency changed to ${val}`, "info");
-      } else {
-        document.getElementById('currencySelector').value = state.currency;
-      }
-    }
-
     function formatCurrency(amount) {
-      const sym = currencySymbols[state.currency] || '₹';
+      const sym = CURRENCY_SYMBOL;
       const num = Number(amount) || 0;
       return sym + num.toLocaleString('en-US', { maximumFractionDigits: 0 });
     }
@@ -831,7 +806,7 @@
     }
 
     function updateCurrencyPrefixes() {
-      const sym = currencySymbols[state.currency] || '₹';
+      const sym = CURRENCY_SYMBOL;
       document.querySelectorAll('#salaryCurrencyPrefix, #expCurrencyPrefix').forEach(el => {
         el.innerText = sym;
       });
