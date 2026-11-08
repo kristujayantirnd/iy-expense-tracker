@@ -171,6 +171,8 @@
     #manageTable tr.inv-service > td:first-child { box-shadow: inset 4px 0 0 #680087; }
     .badge-type-reimb { background: #dcfce7; color: #166534; }
     .badge-type-service { background: #f3e8f8; color: #550070; }
+    #manageTable .inv-no { font-size: .72rem; color: #484848; font-weight: 600; }
+    #manageTabs .nav-link:not(.active) { color: #484848; }
     .type-swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: -1px; }
     .accordion-button:focus { box-shadow: 0 0 0 3px rgba(104, 0, 135, .15); }
     .accordion-button:not(.collapsed) { color: #1a1a1a; }
@@ -313,16 +315,12 @@
       <div class="tab-pane fade" id="manage-sec" role="tabpanel">
         <div class="filter-card p-3">
           <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-            <p class="small text-muted mb-0">Rows of the sheet's Invoice Extracts tab. Add the invoice number and PDF link, then <b>Send to client</b>. Reminders then go out by themselves at the configured intervals until you mark the payment received.</p>
+            <p class="small text-muted mb-0">Rows of the sheet's Invoice Extracts tab. Add the invoice number and PDF link, then <b>Send to client</b>. Approving a reimbursement invoice adds its request's bills to the PDF from page 2. Reminders then go out by themselves at the configured intervals until you mark the payment received.</p>
             <div class="d-flex gap-2 align-items-center">
               <div class="input-group input-group-sm" style="width:16rem">
                 <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
-                <input type="search" id="manageSearch" class="form-control border-start-0 ps-0" placeholder="Search client, invoice no, status…" aria-label="Search invoices" oninput="renderManage()">
+                <input type="search" id="manageSearch" class="form-control border-start-0 ps-0" placeholder="Search client, invoice no…" aria-label="Search invoices" oninput="renderManage()">
               </div>
-              <label for="manageShow" class="visually-hidden">Show</label>
-              <select id="manageShow" class="form-select form-select-sm" style="width:auto" onchange="renderManage()">
-                <option value="open">Open (not paid)</option><option value="all">All</option>
-              </select>
               <button class="btn btn-light border btn-sm" onclick="loadRows()" title="Refresh from the sheet" aria-label="Refresh from the sheet"><i class="fa-solid fa-rotate-right"></i></button>
             </div>
           </div>
@@ -331,6 +329,7 @@
             <span><span class="type-swatch" style="background:#16a34a"></span> Reimbursement invoice</span>
             <span><span class="type-swatch" style="background:#680087"></span> Client / service invoice</span>
           </div>
+          <ul class="nav nav-pills small mb-2 gap-1" id="manageTabs" role="tablist" aria-label="Invoice stage"></ul>
           <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="manageTable"></table></div>
         </div>
       </div>
@@ -449,15 +448,16 @@
         <div id="rwDraftNote" class="alert alert-info small py-2 mb-0 d-none"><i class="fa-solid fa-pen-ruler me-1"></i>Showing the draft saved by <span id="rwDraftBy"></span>. It isn't in the sheet yet.
           <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="discardRowDraft()">Discard draft</button></div>
         <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…" oninput="rowReadiness()"></div>
-        <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" oninput="rowReadiness()"></div>
+        <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" oninput="rowReadiness(); rowBills()"></div>
         <div><label class="form-label small fw-semibold" for="rwGst">Amount with GST (₹)</label><input id="rwGst" type="number" min="0.01" step="0.01" class="form-control" oninput="rowReadiness()">
           <div class="form-text">Amount to be received (saved to Amt(ToBeReceived)): <b id="rwToReceive">-</b> <span class="text-muted" id="rwFormula">= amount with GST − 10% TDS on <span id="rwBase"></span> (amount w/o GST)</span><span id="rwSheetNote" class="text-warning"></span></div></div>
         <div><label class="form-label small fw-semibold" for="rwStatus">Status</label>
-          <select id="rwStatus" class="form-select" onchange="toggleReceived(); rowReadiness()">
+          <select id="rwStatus" class="form-select" onchange="toggleReceived(); rowReadiness(); rowBills()">
             <option value="NEW_ENTRY">New entry</option><option value="APPROVED">Approved (ready to email)</option>
             <option value="REMINDER">Emailed, reminders running</option><option value="Payment Received">Payment received</option>
           </select>
           <div class="form-text" id="rwReadyHint">Fill in the invoice number, PDF link and amount with GST to choose Approved or Emailed.</div></div>
+        <div id="rwBillsBox" class="form-check d-none"><input class="form-check-input" type="checkbox" id="rwBills"><label class="form-check-label small" for="rwBills" id="rwBillsLabel"></label></div>
         <div id="rwReceivedBox"><label class="form-label small fw-semibold" for="rwReceived">Payment received on</label><input id="rwReceived" type="date" class="form-control"></div>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>

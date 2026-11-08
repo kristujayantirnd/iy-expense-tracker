@@ -1,6 +1,6 @@
 // Client Invoice Automator on the Receivables page (Admin and Finance Admin only).
 // Talks to /api/client-invoices; the sheet rows and Gmail are reached through the sheet's Apps Script.
-let inv = { config: null, clients: [], drafts: [], rowDrafts: {}, rows: [], admin: false };
+let inv = { config: null, clients: [], drafts: [], rowDrafts: {}, rows: [], admin: false, manageTab: 'NEW_ENTRY' };
 
 const TEMPLATES = [
   { key: 'requestTemplate', label: 'Finance Team request email', vars: ['InvoiceType', 'Client', 'PO_Number', 'ItemDescription', 'AmountwithoutGST', 'InvoiceDate'] },
@@ -95,26 +95,42 @@ async function loadRows() {
   }
 }
 
+// Manage Invoices tabs, one per stage; any other sheet status counts as a new entry.
+const MANAGE_TABS = [['NEW_ENTRY', 'New entry'], ['APPROVED', 'Approved'], ['REMINDER', 'Reminders'], ['PAID', 'Payment received']];
+const tabOf = (r) => { const s = r.status.toUpperCase(); return s === 'PAYMENT RECEIVED' ? 'PAID' : ['APPROVED', 'REMINDER'].includes(s) ? s : 'NEW_ENTRY'; };
+// A reimbursement invoice goes to the client only once its bills are in the PDF (added when it is approved).
+const billsPending = (r) => isReimbRow(r) && r.billCount > 0 && !r.billsAttached;
+
+function showManageTab(key) { inv.manageTab = key; renderManage(); }
+
 function renderManage() {
-  const open = $id('manageShow').value === 'open';
-  const list = inv.rows.filter((r) => (!open || !isPaid(r)) && matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.status, ROW_STATUS[r.status] || '', r.amount)).slice().reverse(); // newest first
-  if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices match.' : 'No invoices to show.'}</td></tr>`; return; }
-  $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice No</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>Due</th><th>PDF</th><th>Status</th><th></th></tr></thead><tbody>`
+  const found = inv.rows.filter((r) => matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.amount));
+  $id('manageTabs').innerHTML = MANAGE_TABS.map(([key, label]) => {
+    const n = found.filter((r) => tabOf(r) === key).length;
+    const on = key === inv.manageTab;
+    return `<li class="nav-item" role="presentation"><button type="button" role="tab" aria-selected="${on}" class="nav-link py-1 px-3 ${on ? 'active' : ''}" onclick="showManageTab('${key}')">${label} <span class="badge rounded-pill ${on ? 'bg-white text-primary' : 'bg-light text-dark border'} ms-1">${n}</span></button></li>`;
+  }).join('');
+  const paidTab = inv.manageTab === 'PAID';
+  const list = found.filter((r) => tabOf(r) === inv.manageTab).slice().reverse(); // newest first
+  if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices here.' : 'No invoices to show.'}</td></tr>`; return; }
+  $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>${paidTab ? 'Received' : 'Due'}</th><th>PDF</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
       const link = safeLink(r.pdfUrl);
-      const ready = ['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase()) && r.invoiceNumber && link && r.withGst > 0;
       const reimb = isReimbRow(r);
+      const ready = ['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase()) && r.invoiceNumber && link && r.withGst > 0 && !billsPending(r);
+      const draft = rowDraftOf(r);
       return `<tr class="${reimb ? 'inv-reimb' : 'inv-service'}">
         <td style="white-space:normal;min-width:12rem">${esc(r.client)}
-          <div><span class="badge badge-soft ${reimb ? 'badge-type-reimb' : 'badge-type-service'}" style="font-size:10px">${reimb ? 'Reimbursement' : 'Service'}</span></div></td>
-        <td class="fw-semibold">${esc(r.invoiceNumber) || '<span class="text-muted">-</span>'}</td>
+          <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
+            <span class="badge badge-soft ${reimb ? 'badge-type-reimb' : 'badge-type-service'}" style="font-size:10px">${reimb ? 'Reimbursement' : 'Service'}</span>
+            ${r.invoiceNumber ? `<span class="inv-no">${esc(r.invoiceNumber)}</span>` : '<span class="inv-no text-muted fst-italic">No invoice no. yet</span>'}
+            ${draft ? `<span class="badge badge-soft badge-soft-upcoming" style="font-size:10px" title="Draft by ${esc(draft.by)} on ${esc(draft.on)}, not yet in the sheet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span>` : ''}
+          </div></td>
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
-        <td>${esc(r.dueDate)}</td>
-        <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}</td>
-        <td><span class="badge badge-soft ${isPaid(r) ? 'badge-soft-received' : 'badge-soft-pending'}">${esc(ROW_STATUS[r.status] || r.status || '-')}</span>
-          ${isPaid(r) && r.receivedDate ? `<div class="text-muted" style="font-size:11px">${esc(r.receivedDate)}</div>` : ''}
-          ${rowDraftOf(r) ? `<div><span class="badge badge-soft badge-soft-upcoming mt-1" title="Draft by ${esc(rowDraftOf(r).by)} on ${esc(rowDraftOf(r).on)}, not yet in the sheet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span></div>` : ''}</td>
+        <td>${esc(paidTab ? r.receivedDate || '-' : r.dueDate)}</td>
+        <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}
+          ${reimb && r.billCount ? `<div class="inv-no mt-1 ${r.billsAttached ? 'text-success' : 'text-muted'}"><i class="fa-solid fa-paperclip me-1"></i>${r.billCount} bill${r.billCount > 1 ? 's' : ''}${r.billsAttached ? ' included' : ' (added on approval)'}</div>` : ''}</td>
         <td class="text-end text-nowrap">
           <button class="btn btn-light border btn-sm" onclick="openRow(${r.row})"><i class="fa-solid fa-pen"></i> Update</button>
           ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${r.row})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
@@ -154,6 +170,7 @@ function openRow(rowNo) {
   $id('rwReceived').value = (d && d.receivedDate) || editingRow.receivedDateIso || localToday();
   toggleReceived();
   rowReadiness();
+  rowBills();
   modal('rowModal').show();
 }
 
@@ -188,6 +205,21 @@ function rowReadiness() {
   $id('rwReadyHint').classList.toggle('text-danger', missing.length > 0 && NEEDS_DETAILS.includes(sel.value));
 }
 
+// Approving a reimbursement invoice adds its request's bills to the PDF from page 2 (done on Save to sheet).
+function rowBills() {
+  const r = editingRow;
+  const show = isReimbRow(r) && $id('rwStatus').value === 'APPROVED';
+  $id('rwBillsBox').classList.toggle('d-none', !show);
+  if (!show) return;
+  const n = r.billCount || 0;
+  const already = r.billsAttached && $id('rwPdf').value.trim() === r.pdfUrl;
+  $id('rwBills').disabled = !n;
+  $id('rwBills').checked = n > 0 && !already;
+  $id('rwBillsLabel').innerText = !n ? 'No bills were found for this reimbursement request, so the PDF stays as it is.'
+    : already ? `The ${n} bill${n > 1 ? 's are' : ' is'} already in the invoice PDF. Tick to rebuild it from the original invoice with the bills.`
+    : `Add the request's ${n} bill${n > 1 ? 's' : ''} to the invoice PDF from page 2 (a new PDF is saved next to the invoice in Drive).`;
+}
+
 function toggleReceived() {
   const paid = $id('rwStatus').value === 'Payment Received';
   $id('rwReceivedBox').classList.toggle('d-none', !paid);
@@ -200,7 +232,10 @@ async function saveRow(e) {
   if (NEEDS_DETAILS.includes($id('rwStatus').value) && missing.length) return toast(`Add the ${missing.join(', ')} before choosing this status`, false);
   const btn = e.submitter;
   btn.disabled = true;
-  const ok = await invPost({ action: 'update', update: rowForm() }, 'Saved');
+  const attach = !$id('rwBillsBox').classList.contains('d-none') && $id('rwBills').checked;
+  if (attach) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding the bills…';
+  const ok = await invPost({ action: 'update', update: { ...rowForm(), attachBills: attach, rebuildBills: attach && editingRow.billsAttached } }, 'Saved');
+  btn.innerText = 'Save to sheet';
   btn.disabled = false;
   if (ok) { modal('rowModal').hide(); loadRows(); loadData(); }
 }

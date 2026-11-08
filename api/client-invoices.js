@@ -8,6 +8,10 @@
 // Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
+import { PDFDocument, StandardFonts } from 'pdf-lib';
+
+// Approving a reimbursement invoice merges its bills into the PDF through the sheet script (a few round trips).
+export const config = { maxDuration: 60 };
 
 class Bad extends Error {}
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -199,7 +203,8 @@ async function act(db, me, body) {
         receivedDate: status === 'Payment Received' ? date(u.receivedDate) : '',
       });
       await dropRowDraft(db, rowDraftKey(u)); // now in the sheet
-      return { notice: 'Invoice updated in the sheet' };
+      const bills = u.attachBills === true && status === 'APPROVED' ? await attachBills(db, rowNo(u.row), text(u.client, 200, true), u.rebuildBills === true) : '';
+      return { notice: 'Invoice updated in the sheet' + bills };
     }
     case 'send':
       await script(db, { action: 'send', row: rowNo(body.row), client: text(body.client, 200, true) });
@@ -213,6 +218,63 @@ async function act(db, me, body) {
     }
   }
   throw new Bad('Unknown action');
+}
+
+// Reimbursement invoices reach the client with the request's bills from page 2 onwards. The Finance Team's PDF
+// usually has no bills, so on approval the sheet script hands over the invoice and the bills, they are merged here,
+// and the merged PDF is saved next to the invoice in Drive (the row's Invoice link then points at it).
+const MAX_EMAIL_PDF = 24 * 1024 * 1024; // Gmail allows 25 MB of attachments
+async function attachBills(db, row, client, rebuild) {
+  try {
+    const got = await script(db, { action: 'bills', row, client, force: rebuild });
+    if (got.already) return '. The bills are already in the invoice PDF.';
+    if (!got.bills?.length) return '. No bills were found for this reimbursement request, so the PDF is unchanged.';
+    const { pdf, added, skipped } = await mergeBills(got.invoice, got.bills);
+    if (pdf.length > MAX_EMAIL_PDF) return `, but the PDF with the bills would be ${Math.ceil(pdf.length / 1048576)} MB, over Gmail's 25 MB limit, so it is unchanged.`;
+    await script(db, { action: 'saveMerged', row, client, baseId: got.baseId, currentId: got.currentId, data: pdf.toString('base64') });
+    return `. ${added} bill(s) added to the invoice PDF from page 2${skipped ? `; ${skipped} could not be read (a note page stands in for each)` : ''}.`;
+  } catch (e) {
+    if (!(e instanceof Bad)) console.error(e);
+    return `, but the bills could not be added to the PDF: ${e.message || 'unexpected error'}`;
+  }
+}
+
+// invoice / bills: { name, type, data (base64) } from the sheet script; a bill may instead carry { name, error }.
+export async function mergeBills(invoice, bills) {
+  let doc;
+  try {
+    doc = await PDFDocument.load(Buffer.from(invoice.data, 'base64'), { ignoreEncryption: true });
+  } catch {
+    throw new Bad("Can't read the invoice PDF");
+  }
+  const A4 = [595.28, 841.89];
+  const M = 36;
+  let font;
+  let added = 0, skipped = 0;
+  for (const [n, b] of bills.entries()) {
+    try {
+      if (b.error) throw new Error(b.error);
+      const buf = Buffer.from(b.data, 'base64');
+      if (/pdf/i.test(b.type)) {
+        const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+        for (const p of await doc.copyPages(src, src.getPageIndices())) doc.addPage(p);
+      } else {
+        const img = /png/i.test(b.type) ? await doc.embedPng(buf) : await doc.embedJpg(buf);
+        const scale = Math.min((A4[0] - 2 * M) / img.width, (A4[1] - 2 * M) / img.height, 1);
+        const w = img.width * scale, h = img.height * scale;
+        doc.addPage(A4).drawImage(img, { x: (A4[0] - w) / 2, y: (A4[1] - h) / 2, width: w, height: h });
+      }
+      added++;
+    } catch (e) {
+      skipped++;
+      font ||= await doc.embedFont(StandardFonts.Helvetica);
+      const ascii = (s) => String(s).replace(/[^\x20-\x7e]/g, '?').slice(0, 95);
+      const page = doc.addPage(A4);
+      page.drawText(ascii(`Bill ${n + 1}: ${b.name || ''}`), { x: M, y: A4[1] - M - 20, size: 13, font });
+      page.drawText(ascii(`This bill could not be included. ${e.message || ''}`), { x: M, y: A4[1] - M - 44, size: 10, font });
+    }
+  }
+  return { pdf: Buffer.from(await doc.save()), added, skipped };
 }
 
 const rupees = (n) => '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });

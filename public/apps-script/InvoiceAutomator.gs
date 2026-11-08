@@ -19,6 +19,7 @@ function doPost(e) {
     if (b.key !== APP_KEY) return out({ error: 'Wrong key: copy the script again from Receivables, Automator Settings' });
     if (b.action === 'list') return out(iyList_());
     if (b.action === 'sheet') return out(iyReadOldSheetSetup_());
+    if (b.action === 'bills') return out(iyBillFiles_(b));
     // Writes and emails one at a time, so a double click can't send twice.
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(30000)) return out({ error: 'The sheet is busy, please try again in a minute' });
@@ -26,6 +27,7 @@ function doPost(e) {
       if (b.action === 'request') return out(iyRequest_(b));
       if (b.action === 'update') return out(iyUpdate_(b));
       if (b.action === 'send') return out(iySendClient_(b));
+      if (b.action === 'saveMerged') return out(iySaveMerged_(b));
     } finally {
       lock.releaseLock();
     }
@@ -42,6 +44,7 @@ const iyNorm_ = (h) => String(h).toLowerCase().replace(/[^a-z0-9]/g, '');
 const iyTz_ = () => SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
 const iyFmt_ = (d) => (d instanceof Date && !isNaN(d) ? Utilities.formatDate(d, iyTz_(), 'dd/MM/yyyy') : String(d || ''));
 const iyIso_ = (d) => (d instanceof Date && !isNaN(d) ? Utilities.formatDate(d, iyTz_(), 'yyyy-MM-dd') : '');
+const iyNum_ = (v) => Number(String(v).replace(/[^0-9.-]+/g, '')) || 0;
 const iyFileId_ = (url) => (String(url || '').match(/[-\w]{25,}/) || [])[0] || null;
 const iyEsc_ = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const iyRupees_ = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -85,8 +88,47 @@ function iyExtracts_() {
     type: t.col('invoicetype'), received: t.col('pymntrcvddate'),
   };
   Object.keys(c).forEach((k) => { if (c[k] === -1) throw new Error('Invoice Extracts has no column for "' + k + '"'); });
+  // Optional columns (-1 until first needed): a reimbursement request's bill links, and the invoice PDF before and after
+  // the bills were added to it.
+  c.bills = t.col('bills'); c.noBills = t.col('invoicewithoutbills'); c.withBills = t.col('invoicewithbills');
   return { sh: t.sh, width: t.headers.length, c: c };
 }
+
+// Adds an optional Invoice Extracts column at the end of the header row the first time it is needed.
+function iyExtraCol_(x, header) {
+  const headers = x.sh.getRange(1, 1, 1, x.sh.getLastColumn()).getValues()[0].map(iyNorm_);
+  let i = headers.indexOf(iyNorm_(header));
+  if (i === -1) { i = headers.length; x.sh.getRange(1, i + 1).setValue(header); }
+  return i;
+}
+
+// RequestInvoice bill links by client|invoice date|amount, for invoices requested before the Bills column existed.
+function iyRequestBills_() {
+  const req = iyTab_('RequestInvoice');
+  const a = req.col('attachment');
+  const map = {};
+  if (a === -1) return map;
+  const data = req.sh.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (!/reimburs/i.test(String(data[i][req.col('invoicetype')] || ''))) continue;
+    const links = String(data[i][a] || '').split(/\s+/).filter(Boolean);
+    if (!links.length) continue;
+    map[iyKey_(data[i][req.col('client')]) + '|' + iyIso_(iyDate_(data[i][req.col('invoicedate')])) + '|' + iyNum_(data[i][req.col('amountwithoutgst')]).toFixed(2)] = links;
+  }
+  return map;
+}
+
+// A reimbursement invoice's bill links: its Bills cell, else the matching RequestInvoice row's Attachment.
+function iyBillLinks_(x, v, requestBills) {
+  const c = x.c;
+  if (!/reimburs/i.test(String(v[c.type] || ''))) return [];
+  if (c.bills !== -1 && String(v[c.bills] || '').trim()) return String(v[c.bills]).split(/\s+/).filter(Boolean);
+  return requestBills()[iyKey_(v[c.client]) + '|' + iyIso_(iyDate_(v[c.date])) + '|' + iyNum_(v[c.amount]).toFixed(2)] || [];
+}
+
+const iyMemo_ = (fn) => { let v; return () => (v === undefined ? (v = fn()) : v); };
+// True when the invoice PDF link is the merged file this script made (the bills are already in it).
+const iyHasBills_ = (x, v) => x.c.withBills !== -1 && Boolean(iyFileId_(v[x.c.withBills])) && iyFileId_(v[x.c.withBills]) === iyFileId_(v[x.c.pdf]);
 
 // The row the webapp showed, checked against the client so a re-sorted sheet can't be written to the wrong row.
 function iyRow_(x, row, client) {
@@ -107,6 +149,7 @@ function iyList_() {
   const c = x.c;
   const data = x.sh.getDataRange().getValues();
   const rows = [];
+  const requestBills = iyMemo_(iyRequestBills_);
   for (let i = 1; i < data.length; i++) {
     const v = data[i];
     if (!String(v[c.client] || '').trim()) continue;
@@ -118,6 +161,7 @@ function iyList_() {
       dueDate: iyFmt_(iyDate_(v[c.due]) || v[c.due]), pdfUrl: String(v[c.pdf] || '').trim(), status: String(v[c.status] || '').trim(),
       emailed: Boolean(String(v[c.thread] || '').trim()), invoiceType: String(v[c.type] || '').trim(),
       receivedDate: iyFmt_(iyDate_(v[c.received]) || v[c.received]), receivedDateIso: iyIso_(iyDate_(v[c.received])),
+      billCount: iyBillLinks_(x, v, requestBills).length, billsAttached: iyHasBills_(x, v),
     });
   }
   return { rows: rows };
@@ -167,6 +211,8 @@ function iyRequest_(b) {
   x.sh.getRange(extRow, x.c.amount + 1).setNumberFormat('₹#,##0.00');
   x.sh.getRange(extRow, x.c.date + 1).setNumberFormat('dd/mm/yyyy');
   x.sh.getRange(extRow, x.c.due + 1).setNumberFormat('dd/mm/yyyy');
+  // Reimbursement bills are kept on the invoice row too, to be added to the client's PDF when it is approved.
+  if (/reimburs/i.test(b.invoiceType) && attachments.length) x.sh.getRange(extRow, iyExtraCol_(x, 'Bills') + 1).setValue(attachments.join('\n'));
 
   if (!b.sendNow) return { sent: false };
   // The rows are saved either way; a failed email stays TO SEND and the hourly timer retries it.
@@ -207,6 +253,7 @@ function iySendClient_(b) {
   const fileId = iyFileId_(v[c.pdf]);
   if (!fileId) throw new Error('Add the invoice PDF link first');
   if (!(Number(String(v[c.withGst]).replace(/[^0-9.-]+/g, '')) > 0)) throw new Error('Add the amount with GST first');
+  if (iyBillLinks_(x, v, iyMemo_(iyRequestBills_)).length && !iyHasBills_(x, v)) throw new Error('Approve this reimbursement invoice first so its bills are added to the PDF');
   const setup = iySetup_();
   const client = setup.clients[iyKey_(v[c.client])];
   if (!client || !client.primaryEmail) throw new Error('"' + v[c.client] + '" is not in the webapp client list (or has no email)');
@@ -223,6 +270,58 @@ function iySendClient_(b) {
   x.sh.getRange(b.row, c.thread + 1).setValue(sent.getThread().getId());
   x.sh.getRange(b.row, c.status + 1).setValue('REMINDER');
   return { ok: true };
+}
+
+// The Finance Team's invoice PDF and the request's bills (base64), for the webapp to merge: bills from page 2 onwards.
+// Re-approving keeps the bills once: a PDF that already has them is skipped unless force, which rebuilds from the original.
+function iyBillFiles_(b) {
+  const x = iyExtracts_();
+  const v = iyRow_(x, b.row, b.client);
+  const current = iyFileId_(v[x.c.pdf]);
+  if (!current) throw new Error('Add the invoice PDF link first');
+  const merged = iyHasBills_(x, v);
+  if (merged && !b.force) return { already: true };
+  const baseId = merged && x.c.noBills !== -1 && iyFileId_(v[x.c.noBills]) ? iyFileId_(v[x.c.noBills]) : current;
+  const links = iyBillLinks_(x, v, iyMemo_(iyRequestBills_));
+  if (!links.length) return { bills: [] };
+  const pack = (id) => {
+    const f = DriveApp.getFileById(id);
+    let blob = f.getBlob();
+    if (!/pdf|jpeg|png/i.test(blob.getContentType())) blob = blob.getAs('application/pdf'); // Google Docs, other images
+    return { name: f.getName(), type: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };
+  };
+  let invoice;
+  try {
+    invoice = pack(baseId);
+  } catch (e) {
+    throw new Error('Cannot open the invoice PDF in Google Drive. Check the link and that the sheet owner has access to it.');
+  }
+  const bills = links.map((link) => {
+    try {
+      return pack(iyFileId_(link));
+    } catch (e) {
+      return { name: link, error: 'Cannot open this bill in Google Drive (check the link and that the sheet owner has access)' };
+    }
+  });
+  return { invoice: invoice, baseId: baseId, currentId: current, bills: bills };
+}
+
+// Saves the merged PDF next to the original invoice and points the row's Invoice link at it.
+function iySaveMerged_(b) {
+  const x = iyExtracts_();
+  const v = iyRow_(x, b.row, b.client);
+  if (iyFileId_(v[x.c.pdf]) !== b.currentId) throw new Error('The invoice PDF link changed meanwhile. Refresh and approve again.');
+  const base = DriveApp.getFileById(b.baseId);
+  const parents = base.getParents();
+  const folder = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const name = base.getName().replace(/\.pdf$/i, '') + ' - with bills.pdf';
+  const file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(b.data), 'application/pdf', name));
+  try { file.setSharing(base.getSharingAccess(), base.getSharingPermission()); } catch (e) { /* folder sharing still applies */ }
+  if (iyHasBills_(x, v)) { try { DriveApp.getFileById(iyFileId_(v[x.c.withBills])).setTrashed(true); } catch (e) { /* already gone */ } }
+  x.sh.getRange(b.row, iyExtraCol_(x, 'Invoice Without Bills') + 1).setValue('https://drive.google.com/file/d/' + b.baseId + '/view');
+  x.sh.getRange(b.row, iyExtraCol_(x, 'Invoice With Bills') + 1).setValue(file.getUrl());
+  x.sh.getRange(b.row, x.c.pdf + 1).setValue(file.getUrl());
+  return { url: file.getUrl() };
 }
 
 /* ---------- timers ---------- */

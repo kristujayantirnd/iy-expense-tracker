@@ -89,4 +89,16 @@ assert.notEqual(sheetToken('s'), sheetToken('t'));
   assert.equal(iyFileId_('https://drive.google.com/file/d/1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1/view?usp=drivesdk'), '1xGc7Rbrmr4ODSXTfp1rng-acTagO72I1');
 }
 
+// Approved reimbursement invoices: the invoice first, then each bill (PDF pages or an image page), a note page for unreadable ones.
+{
+  const { PDFDocument } = await import('pdf-lib');
+  const { mergeBills } = await import('../api/client-invoices.js');
+  const pdf = async (pages) => { const d = await PDFDocument.create(); for (let i = 0; i < pages; i++) d.addPage(); return Buffer.from(await d.save()).toString('base64'); };
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const m = await mergeBills({ data: await pdf(1) }, [{ type: 'application/pdf', data: await pdf(2) }, { type: 'image/png', data: png }, { name: 'Bill ₹', error: 'Cannot open' }]);
+  assert.equal((await PDFDocument.load(m.pdf)).getPageCount(), 5);
+  assert.deepEqual([m.added, m.skipped], [2, 1]);
+  await assert.rejects(mergeBills({ data: 'bm90' }, []), /invoice PDF/);
+}
+
 console.log('selfcheck ok');
