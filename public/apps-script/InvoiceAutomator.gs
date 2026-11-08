@@ -28,6 +28,7 @@ function doPost(e) {
       if (b.action === 'update') return out(iyUpdate_(b));
       if (b.action === 'send') return out(iySendClient_(b));
       if (b.action === 'saveMerged') return out(iySaveMerged_(b));
+      if (b.action === 'delete') return out(iyDelete_(b));
     } finally {
       lock.releaseLock();
     }
@@ -322,6 +323,30 @@ function iySaveMerged_(b) {
   x.sh.getRange(b.row, iyExtraCol_(x, 'Invoice With Bills') + 1).setValue(file.getUrl());
   x.sh.getRange(b.row, x.c.pdf + 1).setValue(file.getUrl());
   return { url: file.getUrl() };
+}
+
+// Deletes a NEW_ENTRY invoice row (requested by mistake). Its RequestInvoice row goes too while the Finance Team
+// email is still unsent, so the timer won't email it; a request already sent stays as the record of what was asked.
+function iyDelete_(b) {
+  const x = iyExtracts_();
+  const v = iyRow_(x, b.row, b.client);
+  const status = String(v[x.c.status] || '').trim();
+  if (status.toUpperCase() !== 'NEW_ENTRY') throw new Error('Only new entries can be deleted (this one is ' + status + ')');
+  const key = iyKey_(v[x.c.client]) + '|' + iyIso_(iyDate_(v[x.c.date])) + '|' + iyNum_(v[x.c.amount]).toFixed(2);
+  const req = iyTab_('RequestInvoice');
+  const sc = req.col('emailstatus');
+  const data = req.sh.getDataRange().getValues();
+  let request = 'none';
+  for (let i = data.length - 1; i >= 1; i--) { // newest matching request
+    const k = iyKey_(data[i][req.col('client')]) + '|' + iyIso_(iyDate_(data[i][req.col('invoicedate')])) + '|' + iyNum_(data[i][req.col('amountwithoutgst')]).toFixed(2);
+    if (k !== key) continue;
+    if (String(data[i][sc] || '').trim().toUpperCase() === 'SENT') { request = 'sent'; break; }
+    req.sh.deleteRow(i + 1);
+    request = 'removed';
+    break;
+  }
+  x.sh.deleteRow(b.row);
+  return { request: request };
 }
 
 /* ---------- timers ---------- */

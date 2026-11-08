@@ -134,6 +134,7 @@ function renderManage() {
         <td class="text-end text-nowrap">
           <button class="btn btn-light border btn-sm" onclick="openRow(${r.row})"><i class="fa-solid fa-pen"></i> Update</button>
           ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${r.row})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
+          ${r.status.toUpperCase() === 'NEW_ENTRY' ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteRow(${r.row})" title="Delete this new entry" aria-label="Delete invoice for ${esc(r.client)}"><i class="fa-solid fa-trash"></i></button>` : ''}
         </td></tr>`;
     }).join('') + '</tbody>';
 }
@@ -254,6 +255,13 @@ async function saveRowDraft(btn) {
 async function discardRowDraft() {
   if (!confirm('Discard this draft? The form goes back to what the sheet has.')) return;
   if (await invPost({ action: 'deleteRowDraft', update: rowForm() }, 'Draft discarded')) { renderManage(); openRow(editingRow.row); }
+}
+
+// New entries only: removes the row from the sheet (and its request, if the Finance Team hasn't been emailed yet).
+async function deleteRow(rowNo) {
+  const r = inv.rows.find((x) => x.row === rowNo);
+  if (!confirm(`Delete the new entry for ${r.client} (invoice date ${r.invoiceDate}, ${formatINR(r.amount)})?\n\nThe row is removed from the sheet's Invoice Extracts tab. This can't be undone.`)) return;
+  if (await invPost({ action: 'delete', update: { row: r.row, client: r.client, invoiceDateIso: r.invoiceDateIso || '' } }, 'Deleted')) loadRows();
 }
 
 async function sendToClient(rowNo) {

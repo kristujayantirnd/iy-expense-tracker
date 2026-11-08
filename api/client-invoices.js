@@ -4,7 +4,7 @@
 // GET ?key=…            -> the Apps Script: { config, clients }
 // GET                   -> { config, clients, script, key (admin) }
 // GET ?rows=1           -> { rows } from Invoice Extracts
-// POST {action, …}      -> config | client | import | draft | deleteDraft | request | rowDraft | deleteRowDraft | update | send | script (admin)
+// POST {action, …}      -> config | client | import | draft | deleteDraft | request | rowDraft | deleteRowDraft | update | delete | send | script (admin)
 // Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
@@ -205,6 +205,20 @@ async function act(db, me, body) {
       await dropRowDraft(db, rowDraftKey(u)); // now in the sheet
       const bills = u.attachBills === true && status === 'APPROVED' ? await attachBills(db, rowNo(u.row), text(u.client, 200, true), u.rebuildBills === true) : '';
       return { notice: 'Invoice updated in the sheet' + bills };
+    }
+    case 'delete': {
+      // New entries only (checked again by the sheet script). Rows below move up one, so their drafts follow them.
+      const row = rowNo(body.update?.row);
+      const out = await script(db, { action: 'delete', row, client: text(body.update?.client, 200, true) });
+      await dropRowDraft(db, rowDraftKey(body.update));
+      const drafts = await readRowDrafts(db);
+      const moved = Object.fromEntries(Object.entries(drafts).map(([k, d]) => {
+        const [r, ...rest] = k.split('|');
+        return [Number(r) > row ? [Number(r) - 1, ...rest].join('|') : k, d];
+      }));
+      if (Object.keys(drafts).some((k) => Number(k.split('|')[0]) > row)) await setSetting(db, ROW_DRAFTS, JSON.stringify(moved));
+      return { notice: 'Invoice deleted from the sheet.' + (out.request === 'removed' ? ' Its request to the Finance Team had not been emailed yet and is removed too.'
+        : out.request === 'sent' ? ' The Finance Team was already emailed about it, so let them know it is cancelled.' : '') };
     }
     case 'send':
       await script(db, { action: 'send', row: rowNo(body.row), client: text(body.client, 200, true) });
