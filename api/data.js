@@ -7,6 +7,9 @@ import { PT_URL } from './project-tracker.js';
 // (<tracker>/project-board.html?t=<32 hex>); the board's data is fetched through this server.
 const PRIORITIES = 'strategicPriorities';
 const SHARE_TOKEN = /[?&]t=([0-9a-f]{32})(?:&|#|$)/i;
+const parseList = (value) => { try { const v = JSON.parse(value || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+const readPriorities = async (db) => parseList((await db`select value from settings where key = ${PRIORITIES}`)[0]?.value);
+const publicPriority = ({ id, name, url }) => ({ id, name, url }); // the share token stays on the server
 
 const ID = /^[\w-]{1,64}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -50,9 +53,7 @@ async function readState(db) {
        from salary_revisions order by user_id, effective_date, id`,
   ]);
   const currency = settings.find((s) => s.key === 'currency')?.value || 'INR';
-  let priorities = [];
-  try { priorities = JSON.parse(settings.find((s) => s.key === PRIORITIES)?.value || '[]'); } catch { priorities = []; }
-  priorities = priorities.map(({ id, name, url }) => ({ id, name, url }));
+  const priorities = parseList(settings.find((s) => s.key === PRIORITIES)?.value).map(publicPriority);
   return { currency, categories, employees, expenses, revisions, priorities };
 }
 
@@ -71,10 +72,7 @@ async function fetchBoard(token) {
 }
 
 async function priorityBoard(db, priorityId) {
-  const [row] = await db`select value from settings where key = ${PRIORITIES}`;
-  let list = [];
-  try { list = JSON.parse(row?.value || '[]'); } catch { list = []; }
-  const p = list.find((x) => x.id === priorityId);
+  const p = (await readPriorities(db)).find((x) => x.id === priorityId);
   if (!p) throw new Bad('That strategic priority no longer exists');
   return fetchBoard(p.token);
 }
@@ -174,6 +172,12 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET' && req.query.view === 'reimbursements') {
       return res.status(200).json({ rows: await reimbursementRows(db, req.query.from, req.query.to) });
+    }
+    if (req.method === 'GET' && req.query.view === 'priorities') {
+      // the Strategic Priorities page needs only the list, not the whole dashboard
+      const list = await readPriorities(db);
+      const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`;
+      return res.status(200).json({ priorities: list.map(publicPriority), user: user.email, role: user.role, ptLinked: ptAccess(ptLink, user.extra_roles) });
     }
     if (req.method === 'GET' && req.query.view === 'priority') {
       return res.status(200).json(await priorityBoard(db, id(req.query.id)));

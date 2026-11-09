@@ -1289,6 +1289,7 @@ function doPost(e) {
         // Came from the Project Tracker (its "Sign in with Invincible YOU", or the Projects page): open it here.
         const next = new URLSearchParams(location.search).get('next');
         if (['project-tracker', 'projects'].includes(next)) { location.href = '/projects.html'; return; }
+        if (next === 'priorities' && data.role !== 'employee') { location.href = '/priorities.html'; return; }
         if (next === 'receivables' && (data.role !== 'employee' || data.extraRoles.includes('finance_admin'))) { location.href = '/receivables.html'; return; }
         if (data.role === 'management') { location.href = '/'; return; } // Management's home is the Expense Dashboard
         if (data.role === 'employee' && data.ptLinked) { location.href = '/projects.html'; return; } // linked employees start in the Project Tracker
