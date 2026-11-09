@@ -113,8 +113,17 @@ async function upsert(db, type, item) {
   if (!item || typeof item !== 'object') throw new Bad('Missing item');
 
   if (type === 'priorityCategory') {
+    // with id: rename that category; without: add one
     const name = text(item.name, 60, true);
-    if ((await readPriorityCats(db)).some((c) => c.name.toLowerCase() === name.toLowerCase())) throw new Bad('A category with that name already exists');
+    const cats = await readPriorityCats(db);
+    const renameId = item.id ? id(item.id) : null;
+    if (renameId && !cats.some((c) => c.id === renameId)) throw new Bad('That category no longer exists');
+    if (cats.some((c) => c.id !== renameId && c.name.toLowerCase() === name.toLowerCase())) throw new Bad('A category with that name already exists');
+    if (renameId) {
+      return db`update settings set value = (select jsonb_agg(case when e->>'id' = ${renameId} then jsonb_set(e, '{name}', to_jsonb(${name}::text)) else e end)
+                                             from jsonb_array_elements(value::jsonb) e)::text
+                where key = ${PRIORITY_CATS}`;
+    }
     const entry = JSON.stringify([{ id: 'pc' + randomBytes(6).toString('hex'), name }]);
     return db`insert into settings (key, value) values (${PRIORITY_CATS}, ${entry})
               on conflict (key) do update set value = (settings.value::jsonb || excluded.value::jsonb)::text`;

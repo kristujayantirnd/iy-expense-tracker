@@ -61,6 +61,9 @@
           <p class="text-xs text-slate-400">Pending and completed stages</p>
         </div>
         <div id="adminActions" class="flex flex-wrap gap-2" style="display:none">
+          <button onclick="openManageModal()" class="px-4 py-2 rounded-xl text-xs font-semibold transition items-center gap-2 inline-flex bg-white border border-slate-700 text-slate-300 hover:bg-slate-800">
+            <i class="fa-solid fa-sliders"></i> Manage Categories
+          </button>
           <button onclick="openCategoryModal()" class="px-4 py-2 rounded-xl text-xs font-semibold transition items-center gap-2 inline-flex bg-white border border-slate-700 text-slate-300 hover:bg-slate-800">
             <i class="fa-solid fa-folder-plus"></i> Add Category
           </button>
@@ -126,6 +129,21 @@
     </div>
   </div>
 
+  <!-- MODAL: MANAGE CATEGORIES (rename / delete) -->
+  <div id="manageModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i class="fa-solid fa-sliders text-indigo-400"></i> Manage Categories</h3>
+        <button onclick="closeManageModal()" aria-label="Close" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div id="manageList" class="p-6 space-y-2 overflow-y-auto"></div>
+      <div class="px-6 py-4 border-t border-slate-800 flex justify-between items-center gap-3">
+        <span class="text-[11px] text-slate-400">Deleting a category also removes its project links.</span>
+        <button type="button" onclick="closeManageModal()" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Done</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
 
   <script>
@@ -185,6 +203,7 @@
     const NONE = '__none'; // links saved before categories existed
     let activeCat = null;
     let boardReq = 0;
+    const openProjects = new Set(); // project sections left open stay open when the list redraws
     const isAdmin = () => state.role === 'admin';
 
     function tabsList() {
@@ -218,7 +237,7 @@
     async function loadPriorityBoard() {
       renderTabs();
       const board = document.getElementById('priorityBoard');
-      const req = ++boardReq;
+      boardReq++; // stage loads from an earlier draw are ignored
       if (!activeCat) {
         board.innerHTML = `<p class="text-sm text-slate-400">${isAdmin()
           ? 'No categories yet. Start with Add Category, then add project links to it with Add Strategic Priority.'
@@ -232,27 +251,42 @@
           : 'No projects in this category yet.'}</p>`;
         return;
       }
-      board.innerHTML = items.map((p) => `
-        <section class="bg-white border border-slate-700 rounded-2xl p-4 sm:p-5">
-          <div class="flex items-start justify-between gap-3 mb-4">
-            <h3 class="text-base font-bold text-slate-100 break-words"><i class="fa-solid fa-folder-open text-blue-400 mr-2"></i>${esc(p.name)}</h3>
-            <div class="flex items-center gap-1 shrink-0">
+      // Collapsible per project; its stages load when opened, in their own scroll area.
+      board.innerHTML = `<div class="space-y-3">${items.map((p) => `
+        <details class="group bg-white border border-slate-700 rounded-2xl" data-id="${p.id}" ontoggle="toggleProject(this)" ${openProjects.has(p.id) ? 'open' : ''}>
+          <summary class="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden">
+            <span class="flex items-center gap-2 min-w-0 font-bold text-slate-100">
+              <i class="fa-solid fa-chevron-right text-xs text-slate-400 transition group-open:rotate-90"></i>
+              <i class="fa-solid fa-folder-open text-blue-400"></i>
+              <span class="break-words">${esc(p.name)}</span>
+            </span>
+            <span class="flex items-center gap-1 shrink-0">
               ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Open in the Project Tracker" aria-label="Open ${esc(p.name)} in the Project Tracker" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800"><i class="fa-solid fa-up-right-from-square text-xs"></i></a>` : ''}
-              ${isAdmin() ? `<button onclick="deletePriority('${p.id}')" title="Remove from this category" aria-label="Remove ${esc(p.name)}" class="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
-            </div>
-          </div>
-          <div id="board-${p.id}"><p class="text-sm text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading stages…</p></div>
-        </section>`).join('<div class="h-5"></div>');
-      await Promise.all(items.map(async (p) => {
-        let html;
-        try {
-          html = priorityStagesHtml((await api('GET', `?view=priority&id=${encodeURIComponent(p.id)}`)).stages || []);
-        } catch (e) {
-          html = `<p class="text-sm text-red-400"><i class="fa-solid fa-triangle-exclamation mr-2"></i>${esc(e.message)}</p>`;
-        }
-        const el = document.getElementById(`board-${p.id}`);
-        if (req === boardReq && el) el.innerHTML = html;
-      }));
+              ${isAdmin() ? `<button type="button" onclick="event.preventDefault(); deletePriority('${p.id}')" title="Remove from this category" aria-label="Remove ${esc(p.name)}" class="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+            </span>
+          </summary>
+          <div class="border-t border-slate-700 max-h-[65vh] overflow-y-auto overscroll-contain px-4 sm:px-5 py-4" id="board-${p.id}"></div>
+        </details>`).join('')}</div>`;
+      // sections drawn open (left open before) load through their toggle event
+    }
+
+    function toggleProject(d) {
+      const id = d.dataset.id;
+      if (d.open) { openProjects.add(id); loadProject(id, boardReq); } else openProjects.delete(id);
+    }
+
+    // Stages of one project into its section (fetched each time it is opened, so they are current).
+    async function loadProject(id, req) {
+      const el = document.getElementById(`board-${id}`);
+      if (!el) return;
+      el.innerHTML = '<p class="text-sm text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading stages…</p>';
+      let html;
+      try {
+        html = priorityStagesHtml((await api('GET', `?view=priority&id=${encodeURIComponent(id)}`)).stages || []);
+      } catch (e) {
+        html = `<p class="text-sm text-red-400"><i class="fa-solid fa-triangle-exclamation mr-2"></i>${esc(e.message)}</p>`;
+      }
+      if (req === boardReq && document.getElementById(`board-${id}`) === el) el.innerHTML = html;
     }
 
     // Add Category
@@ -284,8 +318,42 @@
       if (!confirm(`Delete the category "${c.name}"${n ? ` and the ${n} project link${n === 1 ? '' : 's'} in it` : ''}? The projects themselves stay in the Project Tracker.`)) return;
       if (await change('DELETE', `?type=priorityCategory&id=${encodeURIComponent(id)}`)) {
         showToast('Category deleted', 'success');
+        renderManageList();
         loadPriorityBoard();
       }
+    }
+
+    // Manage Categories: rename (Save) or delete each one
+    function renderManageList() {
+      const list = document.getElementById('manageList');
+      list.innerHTML = state.categories.length ? state.categories.map((c) => `
+        <form class="flex items-center gap-2" onsubmit="renameCategory(event, '${c.id}')">
+          <input name="name" required maxlength="60" value="${esc(c.name)}" aria-label="Name of ${esc(c.name)}"
+            class="flex-1 min-w-0 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+          <span class="text-[11px] text-slate-500 whitespace-nowrap w-16 text-right">${inTab(c.id).length} project${inTab(c.id).length === 1 ? '' : 's'}</span>
+          <button class="px-3 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-60">Save</button>
+          <button type="button" onclick="deleteCategory('${c.id}')" title="Delete ${esc(c.name)}" aria-label="Delete ${esc(c.name)}" class="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-slate-800"><i class="fa-solid fa-trash-can text-xs"></i></button>
+        </form>`).join('') : '<p class="text-sm text-slate-400">No categories yet. Use Add Category to create one.</p>';
+    }
+    function openManageModal() {
+      renderManageList();
+      document.getElementById('manageModal').classList.remove('hidden');
+    }
+    function closeManageModal() { document.getElementById('manageModal').classList.add('hidden'); }
+
+    async function renameCategory(e, id) {
+      e.preventDefault();
+      const name = e.target.elements.name.value.trim();
+      const c = state.categories.find((x) => x.id === id);
+      if (!c || name === c.name) return;
+      const btn = e.target.querySelector('button:not([type])');
+      btn.disabled = true;
+      const ok = await change('POST', '', { type: 'priorityCategory', item: { id, name } });
+      btn.disabled = false;
+      if (!ok) return;
+      showToast('Category renamed', 'success');
+      renderManageList();
+      renderTabs();
     }
 
     // Add Strategic Priority: pick the category, name the project, paste its view link
