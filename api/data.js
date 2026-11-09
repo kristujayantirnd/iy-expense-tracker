@@ -2,14 +2,28 @@ import { randomBytes } from 'node:crypto';
 import { sql, requireUser, ptAccess } from './_lib.js';
 import { PT_URL } from './project-tracker.js';
 
-// Strategic Priorities: named shortcuts to Project Tracker projects, kept in settings as a JSON array
-// [{id, name, url, token}]. token = the project's share token from its view-only link
-// (<tracker>/project-board.html?t=<32 hex>); the board's data is fetched through this server.
+// Strategic Priorities (IY Strategy module): categories (the page's sub-tabs) holding shortcuts to
+// Project Tracker projects. Both kept in settings as JSON arrays:
+//   strategicPriorityCategories [{id, name}]
+//   strategicPriorities         [{id, name, url, token, categoryId}]  (older entries have no categoryId)
+// token = the project's share token from its view-only link (<tracker>/project-board.html?t=<32 hex>);
+// the board's data is fetched through this server, so the token never goes to the browser.
 const PRIORITIES = 'strategicPriorities';
+const PRIORITY_CATS = 'strategicPriorityCategories';
+const PRIORITY_TYPES = ['priority', 'priorityCategory'];
 const SHARE_TOKEN = /[?&]t=([0-9a-f]{32})(?:&|#|$)/i;
 const parseList = (value) => { try { const v = JSON.parse(value || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const readPriorities = async (db) => parseList((await db`select value from settings where key = ${PRIORITIES}`)[0]?.value);
-const publicPriority = ({ id, name, url }) => ({ id, name, url }); // the share token stays on the server
+const readPriorityCats = async (db) => parseList((await db`select value from settings where key = ${PRIORITY_CATS}`)[0]?.value);
+const publicPriority = ({ id, name, url, categoryId }) => ({ id, name, url, categoryId: categoryId || null }); // no share token
+
+// What the Strategic Priorities page needs: categories, projects, and who is looking.
+async function prioritiesPayload(db, user) {
+  const [cats, list, [ptLink]] = await Promise.all([readPriorityCats(db), readPriorities(db),
+    db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`]);
+  return { priorityCategories: cats.map(({ id, name }) => ({ id, name })), priorities: list.map(publicPriority),
+    user: user.email, role: user.role, ptLinked: ptAccess(ptLink, user.extra_roles) };
+}
 
 const ID = /^[\w-]{1,64}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
@@ -53,8 +67,7 @@ async function readState(db) {
        from salary_revisions order by user_id, effective_date, id`,
   ]);
   const currency = settings.find((s) => s.key === 'currency')?.value || 'INR';
-  const priorities = parseList(settings.find((s) => s.key === PRIORITIES)?.value).map(publicPriority);
-  return { currency, categories, employees, expenses, revisions, priorities };
+  return { currency, categories, employees, expenses, revisions };
 }
 
 // The project's board from the Project Tracker's view-only API (pending + completed stages).
@@ -99,13 +112,23 @@ async function upsert(db, type, item) {
   }
   if (!item || typeof item !== 'object') throw new Bad('Missing item');
 
+  if (type === 'priorityCategory') {
+    const name = text(item.name, 60, true);
+    if ((await readPriorityCats(db)).some((c) => c.name.toLowerCase() === name.toLowerCase())) throw new Bad('A category with that name already exists');
+    const entry = JSON.stringify([{ id: 'pc' + randomBytes(6).toString('hex'), name }]);
+    return db`insert into settings (key, value) values (${PRIORITY_CATS}, ${entry})
+              on conflict (key) do update set value = (settings.value::jsonb || excluded.value::jsonb)::text`;
+  }
+
   if (type === 'priority') {
+    const categoryId = id(item.categoryId || '');
+    if (!(await readPriorityCats(db)).some((c) => c.id === categoryId)) throw new Bad('Pick a category (add one first with Add Category)');
     const name = text(item.name, 80, true);
     const url = text(item.url, 500, true);
     const token = url.match(SHARE_TOKEN)?.[1]?.toLowerCase();
     if (!token) throw new Bad("Paste the project's view link (it ends with ?t= and a 32-character code)");
     await fetchBoard(token); // fails early if the link is wrong or was reset
-    const entry = JSON.stringify([{ id: 'sp' + randomBytes(6).toString('hex'), name, url, token }]);
+    const entry = JSON.stringify([{ id: 'sp' + randomBytes(6).toString('hex'), name, url, token, categoryId }]);
     return db`insert into settings (key, value) values (${PRIORITIES}, ${entry})
               on conflict (key) do update set value = (settings.value::jsonb || excluded.value::jsonb)::text`;
   }
@@ -154,6 +177,17 @@ async function remove(db, type, rowId) {
       db`delete from categories where id = ${rowId}`,
     ]);
   }
+  if (type === 'priorityCategory') {
+    // the category and every project link filed under it
+    return db.transaction([
+      db`update settings set value = (select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(value::jsonb) e
+                                      where e->>'id' <> ${rowId})::text
+         where key = ${PRIORITY_CATS}`,
+      db`update settings set value = (select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(value::jsonb) e
+                                      where coalesce(e->>'categoryId', '') <> ${rowId})::text
+         where key = ${PRIORITIES}`,
+    ]);
+  }
   if (type === 'priority') {
     return db`update settings set value = (select coalesce(jsonb_agg(e), '[]'::jsonb) from jsonb_array_elements(value::jsonb) e
                                            where e->>'id' <> ${rowId})::text
@@ -174,16 +208,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ rows: await reimbursementRows(db, req.query.from, req.query.to) });
     }
     if (req.method === 'GET' && req.query.view === 'priorities') {
-      // the Strategic Priorities page needs only the list, not the whole dashboard
-      const list = await readPriorities(db);
-      const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`;
-      return res.status(200).json({ priorities: list.map(publicPriority), user: user.email, role: user.role, ptLinked: ptAccess(ptLink, user.extra_roles) });
+      // the Strategic Priorities page needs only its own lists, not the whole dashboard
+      return res.status(200).json(await prioritiesPayload(db, user));
     }
     if (req.method === 'GET' && req.query.view === 'priority') {
       return res.status(200).json(await priorityBoard(db, id(req.query.id)));
     }
     if (req.method === 'POST') await upsert(db, req.body?.type, req.body?.item);
     else if (req.method === 'DELETE') await remove(db, req.query.type, req.query.id);
+    const changed = req.method === 'POST' ? req.body?.type : req.query.type;
+    if (req.method !== 'GET' && PRIORITY_TYPES.includes(changed)) return res.status(200).json(await prioritiesPayload(db, user));
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const [ptLink] = await db`select 1 from pt_owner_links where user_id = ${user.id} limit 1`;
     res.status(200).json({ ...(await readState(db)), user: user.email, role: user.role, ptLinked: ptAccess(ptLink, user.extra_roles) });

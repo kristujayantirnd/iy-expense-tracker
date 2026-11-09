@@ -60,9 +60,14 @@
           <h2 class="text-xl font-bold text-slate-100">Strategic Priorities</h2>
           <p class="text-xs text-slate-400">Pending and completed stages</p>
         </div>
-        <button id="addPriorityBtn" onclick="openPriorityModal()" style="display:none" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition items-center gap-2 shadow-lg shadow-indigo-600/20">
-          <i class="fa-solid fa-plus"></i> Add Strategic Priority
-        </button>
+        <div id="adminActions" class="flex flex-wrap gap-2" style="display:none">
+          <button onclick="openCategoryModal()" class="px-4 py-2 rounded-xl text-xs font-semibold transition items-center gap-2 inline-flex bg-white border border-slate-700 text-slate-300 hover:bg-slate-800">
+            <i class="fa-solid fa-folder-plus"></i> Add Category
+          </button>
+          <button onclick="openPriorityModal()" class="px-4 py-2 rounded-xl text-xs font-semibold transition items-center gap-2 inline-flex bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-600/20">
+            <i class="fa-solid fa-plus"></i> Add Strategic Priority
+          </button>
+        </div>
       </div>
       <div id="prioritySubTabs" class="flex flex-wrap gap-2"></div>
       <div id="priorityBoard"></div>
@@ -79,7 +84,11 @@
       </div>
       <form id="priorityForm" onsubmit="savePriority(event)" class="p-6 space-y-4">
         <div>
-          <label for="prioName" class="block text-xs font-medium text-slate-300 mb-1">Name *</label>
+          <label for="prioCategory" class="block text-xs font-medium text-slate-300 mb-1">Category *</label>
+          <select id="prioCategory" required class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 cursor-pointer"></select>
+        </div>
+        <div>
+          <label for="prioName" class="block text-xs font-medium text-slate-300 mb-1">Project name *</label>
           <input type="text" id="prioName" required maxlength="80" placeholder="e.g. New campus launch" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
         </div>
         <div>
@@ -96,10 +105,31 @@
   </div>
 
 
+  <!-- MODAL: ADD CATEGORY (a sub-tab) -->
+  <div id="categoryModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+        <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2"><i class="fa-solid fa-folder-plus text-indigo-400"></i> Add Category</h3>
+        <button onclick="closeCategoryModal()" aria-label="Close" class="text-slate-400 hover:text-slate-100 transition"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="categoryForm" onsubmit="saveCategory(event)" class="p-6 space-y-4">
+        <div>
+          <label for="catName" class="block text-xs font-medium text-slate-300 mb-1">Category name *</label>
+          <input type="text" id="catName" required maxlength="60" placeholder="e.g. Academic growth" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500">
+          <p class="text-[11px] text-slate-400 mt-1">Each category is a sub-tab. Add project links to it with Add Strategic Priority.</p>
+        </div>
+        <div class="pt-4 border-t border-slate-800 flex justify-end space-x-3">
+          <button type="button" onclick="closeCategoryModal()" class="px-4 py-2 rounded-xl text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Cancel</button>
+          <button type="submit" id="catSave" class="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition disabled:opacity-60">Add</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
 
   <script>
-    let state = { role: '', priorities: [] };
+    let state = { role: '', categories: [], priorities: [] };
 
     function esc(v) {
       return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -119,7 +149,7 @@
     }
 
     function applyState(data) {
-      state = { role: data.role, priorities: data.priorities || [] };
+      state = { role: data.role, categories: data.priorityCategories || [], priorities: data.priorities || [] };
       document.getElementById('currentUser').innerText = data.user || '';
       renderModules(document.getElementById('moduleNav'), { role: data.role, ptLinked: data.ptLinked, current: 'priorities' });
     }
@@ -150,51 +180,121 @@
       location.href = '/payouts.html';
     }
 
-    // STRATEGIC PRIORITIES: sub-tabs = selected Project Tracker projects (view links); admin adds/deletes.
-    let activePriority = null;
-    let priorityReq = 0;
+    // STRATEGIC PRIORITIES: sub-tabs = categories; each holds project view links from the Project Tracker.
+    // Admin adds/deletes categories and links; management views.
+    const NONE = '__none'; // links saved before categories existed
+    let activeCat = null;
+    let boardReq = 0;
     const isAdmin = () => state.role === 'admin';
 
-    function renderPriorityTabs() {
-      const list = state.priorities || [];
-      document.getElementById('addPriorityBtn').style.display = isAdmin() ? 'inline-flex' : 'none';
-      if (!list.some((p) => p.id === activePriority)) activePriority = list[0]?.id || null;
-      document.getElementById('prioritySubTabs').innerHTML = list.map((p) => {
-        const on = p.id === activePriority;
+    function tabsList() {
+      const tabs = state.categories.map((c) => ({ ...c }));
+      if (state.priorities.some((p) => !p.categoryId || !state.categories.some((c) => c.id === p.categoryId))) tabs.push({ id: NONE, name: 'Uncategorised', fixed: true });
+      return tabs;
+    }
+    const inTab = (tabId) => state.priorities.filter((p) => tabId === NONE
+      ? !p.categoryId || !state.categories.some((c) => c.id === p.categoryId) : p.categoryId === tabId);
+
+    function renderTabs() {
+      const tabs = tabsList();
+      document.getElementById('adminActions').style.display = isAdmin() ? 'flex' : 'none';
+      if (!tabs.some((t) => t.id === activeCat)) activeCat = tabs[0]?.id || null;
+      document.getElementById('prioritySubTabs').innerHTML = tabs.map((t) => {
+        const on = t.id === activeCat;
+        const del = isAdmin() && !t.fixed;
         return `<span class="inline-flex items-center rounded-full border text-xs font-semibold ${on ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:bg-slate-800'}">
-          <button class="pl-3 ${isAdmin() ? 'pr-1.5' : 'pr-3'} py-1.5" onclick="selectPriority('${p.id}')">${esc(p.name)}</button>
-          ${isAdmin() ? `<button class="pr-2.5 pl-1 py-1.5 ${on ? 'text-white/80 hover:text-white' : 'text-slate-500 hover:text-red-400'}" title="Delete ${esc(p.name)}" aria-label="Delete ${esc(p.name)}" onclick="deletePriority('${p.id}')"><i class="fa-solid fa-xmark"></i></button>` : ''}
+          <button class="pl-3 ${del ? 'pr-1.5' : 'pr-3'} py-1.5" onclick="selectCategory('${t.id}')">${esc(t.name)} <span class="${on ? 'text-white/70' : 'text-slate-500'} font-normal">${inTab(t.id).length}</span></button>
+          ${del ? `<button class="pr-2.5 pl-1 py-1.5 ${on ? 'text-white/80 hover:text-white' : 'text-slate-500 hover:text-red-400'}" title="Delete ${esc(t.name)}" aria-label="Delete category ${esc(t.name)}" onclick="deleteCategory('${t.id}')"><i class="fa-solid fa-xmark"></i></button>` : ''}
         </span>`;
       }).join('');
-      if (!list.length) {
-        document.getElementById('priorityBoard').innerHTML = `<p class="text-sm text-slate-400">${isAdmin()
-          ? 'No strategic priorities yet. Use Add Strategic Priority and paste a project\'s view link from the Project Tracker.'
-          : 'No strategic priorities yet.'}</p>`;
-      }
     }
 
-    function selectPriority(id) {
-      activePriority = id;
-      renderPriorityTabs();
+    function selectCategory(id) {
+      activeCat = id;
       loadPriorityBoard();
     }
 
+    // The active category: one section per project link, each with its pending and completed stages.
     async function loadPriorityBoard() {
-      renderPriorityTabs();
-      if (!activePriority) return;
+      renderTabs();
       const board = document.getElementById('priorityBoard');
-      const req = ++priorityReq;
-      board.innerHTML = '<p class="text-sm text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading stages…</p>';
-      try {
-        const data = await api('GET', `?view=priority&id=${encodeURIComponent(activePriority)}`);
-        if (req === priorityReq) board.innerHTML = priorityStagesHtml(data.stages || []);
-      } catch (e) {
-        if (req === priorityReq) board.innerHTML = `<p class="text-sm text-red-400"><i class="fa-solid fa-triangle-exclamation mr-2"></i>${esc(e.message)}</p>`;
+      const req = ++boardReq;
+      if (!activeCat) {
+        board.innerHTML = `<p class="text-sm text-slate-400">${isAdmin()
+          ? 'No categories yet. Start with Add Category, then add project links to it with Add Strategic Priority.'
+          : 'No strategic priorities yet.'}</p>`;
+        return;
+      }
+      const items = inTab(activeCat);
+      if (!items.length) {
+        board.innerHTML = `<p class="text-sm text-slate-400">${isAdmin()
+          ? 'No projects in this category yet. Use Add Strategic Priority and pick this category.'
+          : 'No projects in this category yet.'}</p>`;
+        return;
+      }
+      board.innerHTML = items.map((p) => `
+        <section class="bg-white border border-slate-700 rounded-2xl p-4 sm:p-5">
+          <div class="flex items-start justify-between gap-3 mb-4">
+            <h3 class="text-base font-bold text-slate-100 break-words"><i class="fa-solid fa-folder-open text-blue-400 mr-2"></i>${esc(p.name)}</h3>
+            <div class="flex items-center gap-1 shrink-0">
+              ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" title="Open in the Project Tracker" aria-label="Open ${esc(p.name)} in the Project Tracker" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-100 hover:bg-slate-800"><i class="fa-solid fa-up-right-from-square text-xs"></i></a>` : ''}
+              ${isAdmin() ? `<button onclick="deletePriority('${p.id}')" title="Remove from this category" aria-label="Remove ${esc(p.name)}" class="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-slate-800"><i class="fa-solid fa-trash-can text-xs"></i></button>` : ''}
+            </div>
+          </div>
+          <div id="board-${p.id}"><p class="text-sm text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Loading stages…</p></div>
+        </section>`).join('<div class="h-5"></div>');
+      await Promise.all(items.map(async (p) => {
+        let html;
+        try {
+          html = priorityStagesHtml((await api('GET', `?view=priority&id=${encodeURIComponent(p.id)}`)).stages || []);
+        } catch (e) {
+          html = `<p class="text-sm text-red-400"><i class="fa-solid fa-triangle-exclamation mr-2"></i>${esc(e.message)}</p>`;
+        }
+        const el = document.getElementById(`board-${p.id}`);
+        if (req === boardReq && el) el.innerHTML = html;
+      }));
+    }
+
+    // Add Category
+    function openCategoryModal() {
+      document.getElementById('categoryForm').reset();
+      document.getElementById('categoryModal').classList.remove('hidden');
+      document.getElementById('catName').focus();
+    }
+    function closeCategoryModal() { document.getElementById('categoryModal').classList.add('hidden'); }
+
+    async function saveCategory(e) {
+      e.preventDefault();
+      const btn = document.getElementById('catSave');
+      btn.disabled = true;
+      const before = new Set(state.categories.map((c) => c.id));
+      const ok = await change('POST', '', { type: 'priorityCategory', item: { name: document.getElementById('catName').value } });
+      btn.disabled = false;
+      if (!ok) return;
+      closeCategoryModal();
+      activeCat = state.categories.find((c) => !before.has(c.id))?.id || activeCat;
+      showToast('Category added', 'success');
+      loadPriorityBoard();
+    }
+
+    async function deleteCategory(id) {
+      const c = state.categories.find((x) => x.id === id);
+      if (!c) return;
+      const n = inTab(id).length;
+      if (!confirm(`Delete the category "${c.name}"${n ? ` and the ${n} project link${n === 1 ? '' : 's'} in it` : ''}? The projects themselves stay in the Project Tracker.`)) return;
+      if (await change('DELETE', `?type=priorityCategory&id=${encodeURIComponent(id)}`)) {
+        showToast('Category deleted', 'success');
+        loadPriorityBoard();
       }
     }
 
+    // Add Strategic Priority: pick the category, name the project, paste its view link
     function openPriorityModal() {
+      if (!state.categories.length) { showToast('Add a category first', 'error'); openCategoryModal(); return; }
       document.getElementById('priorityForm').reset();
+      const sel = document.getElementById('prioCategory');
+      sel.innerHTML = state.categories.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      if (state.categories.some((c) => c.id === activeCat)) sel.value = activeCat;
       document.getElementById('priorityModal').classList.remove('hidden');
       document.getElementById('prioName').focus();
     }
@@ -204,21 +304,21 @@
       e.preventDefault();
       const btn = document.getElementById('prioSave');
       btn.disabled = true;
-      const before = new Set((state.priorities || []).map((p) => p.id));
-      const ok = await change('POST', '', { type: 'priority', item: { name: document.getElementById('prioName').value, url: document.getElementById('prioUrl').value } });
+      const categoryId = document.getElementById('prioCategory').value;
+      const ok = await change('POST', '', { type: 'priority', item: { categoryId, name: document.getElementById('prioName').value, url: document.getElementById('prioUrl').value } });
       btn.disabled = false;
       if (!ok) return;
       closePriorityModal();
-      activePriority = (state.priorities || []).find((p) => !before.has(p.id))?.id || activePriority;
+      activeCat = categoryId;
       showToast('Strategic priority added', 'success');
       loadPriorityBoard();
     }
 
     async function deletePriority(id) {
-      const p = (state.priorities || []).find((x) => x.id === id);
-      if (!p || !confirm(`Delete the strategic priority "${p.name}"? The project itself stays in the Project Tracker.`)) return;
+      const p = state.priorities.find((x) => x.id === id);
+      if (!p || !confirm(`Remove "${p.name}" from Strategic Priorities? The project itself stays in the Project Tracker.`)) return;
       if (await change('DELETE', `?type=priority&id=${encodeURIComponent(id)}`)) {
-        showToast('Strategic priority deleted', 'success');
+        showToast('Strategic priority removed', 'success');
         loadPriorityBoard();
       }
     }
