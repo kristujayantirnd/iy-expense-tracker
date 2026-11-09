@@ -94,7 +94,8 @@
           </select>
           <button onclick="openInvoice('salary')" class="btn-primary"><i class="fa-solid fa-plus"></i>Salary Invoice</button>
           <button onclick="openInvoice('reimbursement')" class="btn-primary"><i class="fa-solid fa-plus"></i>Reimbursement Invoice</button>
-          <button id="directBtn" onclick="openInvoice('direct')" class="btn-primary hidden"><i class="fa-solid fa-plus"></i>Direct Expenses</button>
+          <!-- Admin only. Shown by JS; style.display because .btn-primary's inline-flex beats the "hidden" class. -->
+          <button id="directBtn" onclick="openInvoice('direct')" class="btn-primary" style="display:none"><i class="fa-solid fa-plus"></i>Direct Expenses</button>
         </div>
       </div>
       <div class="overflow-x-auto"><table class="w-full" id="invoiceTable"></table></div>
@@ -479,7 +480,7 @@
       state = data;
       $('currentUser').innerText = data.me.email;
       renderModules($('moduleNav'), { role: data.me.role, ptLinked: data.me.ptLinked, extraRoles: data.me.extraRoles, current: 'payouts' });
-      $('directBtn').classList.toggle('hidden', data.me.role !== 'admin');
+      $('directBtn').style.display = data.me.role === 'admin' ? '' : 'none';
       $('settingsBtn').classList.toggle('hidden', data.me.role !== 'admin');
       $('tabs').innerHTML = TABS[data.me.role].map(([k, label]) => `<button class="tab" data-tab="${k}" onclick="showTab('${k}')">${label}</button>`).join('');
       if (firstLoad) fillForms();
