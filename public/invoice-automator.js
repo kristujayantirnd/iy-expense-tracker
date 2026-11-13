@@ -103,8 +103,11 @@ const billsPending = (r) => isReimbRow(r) && r.billCount > 0 && !r.billsAttached
 
 function showManageTab(key) { inv.manageTab = key; renderManage(); }
 
+// Amount Receivable column: the sheet's "to be received" figure, else worked out from the amount with GST (blank until that is in).
+const receivableOf = (r) => (r.toReceive > 0 ? r.toReceive : r.withGst > 0 ? toBeReceived(r.withGst, r.amount, isReimbRow(r)) : 0);
+
 function renderManage() {
-  const found = inv.rows.filter((r) => matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.amount));
+  const found = inv.rows.filter((r) => matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.amount, receivableOf(r) || ''));
   $id('manageTabs').innerHTML = MANAGE_TABS.map(([key, label]) => {
     const n = found.filter((r) => tabOf(r) === key).length;
     const on = key === inv.manageTab;
@@ -113,7 +116,7 @@ function renderManage() {
   const paidTab = inv.manageTab === 'PAID';
   const list = found.filter((r) => tabOf(r) === inv.manageTab).slice().reverse(); // newest first
   if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices here.' : 'No invoices to show.'}</td></tr>`; return; }
-  $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th>${paidTab ? 'Received' : 'Due'}</th><th>PDF</th><th></th></tr></thead><tbody>`
+  $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th class="text-end">Amount Receivable</th><th>${paidTab ? 'Received' : 'Due'}</th><th>PDF</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
       const link = safeLink(r.pdfUrl);
       const reimb = isReimbRow(r);
@@ -128,6 +131,7 @@ function renderManage() {
           </div></td>
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
+        <td class="text-end" title="${isReimbRow(r) ? 'Amount with GST (reimbursement, no TDS)' : 'Amount with GST − 10% TDS on the amount w/o GST'}">${receivableOf(r) ? formatINR(receivableOf(r)) : '<span class="text-muted" title="Add the amount with GST to see this">-</span>'}</td>
         <td>${esc(paidTab ? r.receivedDate || '-' : r.dueDate)}</td>
         <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}
           ${reimb && r.billCount ? `<div class="inv-no mt-1 ${r.billsAttached ? 'text-success' : 'text-muted'}"><i class="fa-solid fa-paperclip me-1"></i>${r.billCount} bill${r.billCount > 1 ? 's' : ''}${r.billsAttached ? ' included' : ' (added on approval)'}</div>` : ''}</td>
