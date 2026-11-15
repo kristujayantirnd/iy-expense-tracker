@@ -163,3 +163,74 @@ create table if not exists reimb_requests (
   updated_at timestamptz not null default now()
 );
 create unique index if not exists reimb_requests_client_key on reimb_requests (lower(client));
+
+-- Receivables · Products & Services master: each product/service has a list of items, each tagged with
+-- a pricing model, whether it is mandatory, and the other items it needs first (prerequisites, item ids).
+create table if not exists ps_products (
+  id serial primary key,
+  name text not null,
+  description text not null default '',
+  created_at timestamptz not null default now()
+);
+create unique index if not exists ps_products_name_key on ps_products (lower(name));
+create table if not exists ps_items (
+  id serial primary key,
+  product_id int not null references ps_products(id) on delete cascade,
+  name text not null,
+  pricing_model text not null check (pricing_model in ('per_head', 'per_batch', 'per_hour', 'per_day', 'per_month', 'fixed')),
+  mandatory boolean not null default false,
+  prerequisites int[] not null default '{}',
+  sort int not null default 0
+);
+create index if not exists ps_items_product on ps_items (product_id);
+
+-- Rate cards: products added row by row, their items carried in with a charge (unit price) each.
+-- The item's attributes are copied in and may be changed for this rate card.
+create table if not exists rate_cards (
+  id serial primary key,
+  name text not null,
+  description text not null default '',
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists rate_cards_name_key on rate_cards (lower(name));
+create table if not exists rate_card_items (
+  id serial primary key,
+  rate_card_id int not null references rate_cards(id) on delete cascade,
+  item_id int not null references ps_items(id),
+  unit_price numeric not null default 0,
+  pricing_model text not null,
+  mandatory boolean not null default false,
+  prerequisites int[] not null default '{}',
+  sort int not null default 0,
+  unique (rate_card_id, item_id)
+);
+
+-- Client engagement plans: a rate card copied to a client, then shaped into the client's cost structure.
+-- units = head count / batches / hours / days / months (1 for fixed); actual = unit_price * units;
+-- signed_up null = same as actual. Once frozen, the signed-up total must stay at frozen_total.
+create table if not exists client_plans (
+  id serial primary key,
+  client_id int not null references clients(id),
+  name text not null,
+  rate_card_id int references rate_cards(id) on delete set null,
+  notes text not null default '',
+  frozen_total numeric,
+  frozen_at timestamptz,
+  frozen_by int references users(id) on delete set null,
+  updated_by int references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+create table if not exists client_plan_items (
+  id serial primary key,
+  plan_id int not null references client_plans(id) on delete cascade,
+  item_id int not null references ps_items(id),
+  pricing_model text not null,
+  mandatory boolean not null default false,
+  prerequisites int[] not null default '{}',
+  unit_price numeric not null default 0,
+  units numeric not null default 1,
+  signed_up numeric,
+  sort int not null default 0,
+  unique (plan_id, item_id)
+);

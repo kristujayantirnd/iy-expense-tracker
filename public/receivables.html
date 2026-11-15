@@ -275,6 +275,10 @@
       <li class="nav-item manage-only d-none"><button class="nav-link" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-sec" type="button"><i class="fa-solid fa-pen-to-square me-1"></i> Manage Invoices</button></li>
       <li class="nav-item manage-only d-none"><button class="nav-link" id="clients-tab" data-bs-toggle="tab" data-bs-target="#clients-sec" type="button"><i class="fa-solid fa-address-book me-1"></i> Clients</button></li>
       <li class="nav-item manage-only d-none"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-sec" type="button"><i class="fa-solid fa-gear me-1"></i> Automator Settings</button></li>
+      <!-- Products & Services, Rate Cards, Engagement Plans: Admin, Finance Admin and Management (shown by engagements.js) -->
+      <li class="nav-item eng-only d-none"><button class="nav-link" id="products-tab" data-bs-toggle="tab" data-bs-target="#products-sec" type="button"><i class="fa-solid fa-boxes-stacked me-1"></i> Products &amp; Services</button></li>
+      <li class="nav-item eng-only d-none"><button class="nav-link" id="ratecards-tab" data-bs-toggle="tab" data-bs-target="#ratecards-sec" type="button"><i class="fa-solid fa-tags me-1"></i> Rate Cards</button></li>
+      <li class="nav-item eng-only d-none"><button class="nav-link" id="plans-tab" data-bs-toggle="tab" data-bs-target="#plans-sec" type="button"><i class="fa-solid fa-handshake me-1"></i> Engagement Plans</button></li>
     </ul>
 
     <div class="tab-content" id="dashboardTabsContent">
@@ -391,7 +395,84 @@
           </details>
         </div>
       </div>
+      <div class="tab-pane fade" id="products-sec" role="tabpanel">
+        <div class="filter-card p-3">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">The master list of what we sell. Each product or service has list items, each tagged with a pricing model, whether it is mandatory, and the items it needs first.</p>
+            <div class="d-flex gap-2 align-items-center">
+              <div class="input-group input-group-sm" style="width:16rem">
+                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input type="search" id="psSearch" class="form-control border-start-0 ps-0" placeholder="Search products, items…" aria-label="Search products and services" oninput="engRenderProducts()">
+              </div>
+              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenProduct()"><i class="fa-solid fa-plus me-1"></i>Add product / service</button>
+            </div>
+          </div>
+          <div id="psList"></div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="ratecards-sec" role="tabpanel">
+        <div class="filter-card p-3" id="rcListBox">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">Rate cards are price lists built from the master: add products row by row, set the charge per unit for each list item, and change an item's tags for this card if needed.</p>
+            <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenCard()"><i class="fa-solid fa-plus me-1"></i>New rate card</button>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="rcTable"></table></div>
+        </div>
+        <div class="filter-card p-3 d-none" id="rcEditor"></div>
+      </div>
+
+      <div class="tab-pane fade" id="plans-sec" role="tabpanel">
+        <div class="filter-card p-3" id="cpListBox">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">A client's cost structure: copy a rate card to the client, set the units (head count, batches, hours, days, months), adjust the items, and record the signed-up amounts. Freeze it once agreed.</p>
+            <div class="d-flex gap-2 align-items-center">
+              <div class="input-group input-group-sm" style="width:16rem">
+                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input type="search" id="cpSearch" class="form-control border-start-0 ps-0" placeholder="Search client, plan…" aria-label="Search engagement plans" oninput="engRenderPlans()">
+              </div>
+              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenApply()"><i class="fa-solid fa-copy me-1"></i>Apply rate card to client</button>
+            </div>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="cpTable"></table></div>
+        </div>
+        <div class="filter-card p-3 d-none" id="cpEditor"></div>
+      </div>
     </div>
+  </div>
+
+  <!-- Products & Services / Rate Cards / Engagement Plans dialogs -->
+  <div class="modal fade" id="psModal" tabindex="-1" aria-labelledby="psTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl"><form class="modal-content" onsubmit="engSaveProduct(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="psTitle">Product / service</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <div class="row g-3 mb-3">
+          <div class="col-md-5"><label class="form-label small fw-semibold" for="psName">Name</label><input id="psName" class="form-control" maxlength="150" required></div>
+          <div class="col-md-7"><label class="form-label small fw-semibold" for="psDesc">Description</label><input id="psDesc" class="form-control" maxlength="1000"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h3 class="h6 fw-bold mb-0">List items</h3>
+          <button type="button" class="btn btn-light border btn-sm" onclick="engAddPsItem()"><i class="fa-solid fa-plus me-1"></i>Add list item</button>
+        </div>
+        <div class="table-responsive"><table class="table align-middle small mb-0" id="psItems"></table></div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button type="button" class="btn btn-outline-danger" id="psDelete" onclick="engDeleteProduct()"><i class="fa-solid fa-trash me-1"></i>Delete</button>
+        <div><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button> <button class="btn btn-primary fw-semibold">Save</button></div>
+      </div>
+    </form></div>
+  </div>
+  <div class="modal fade" id="applyModal" tabindex="-1" aria-labelledby="applyTitle" aria-hidden="true">
+    <div class="modal-dialog"><form class="modal-content" onsubmit="engApply(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="applyTitle">Apply a rate card to a client</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <label class="form-label small fw-semibold" for="apClient">Client</label><select id="apClient" class="form-select mb-3" required></select>
+        <label class="form-label small fw-semibold" for="apCard">Rate card</label><select id="apCard" class="form-select mb-3" required></select>
+        <label class="form-label small fw-semibold" for="apName">Plan name</label><input id="apName" class="form-control" maxlength="150" placeholder="e.g. FY27 Leadership Program (defaults to the rate card's name)">
+        <div class="form-text">The rate card is copied: later changes to it don't change this client's plan.</div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Copy to client</button></div>
+    </form></div>
   </div>
 
   <!-- Automator dialogs -->
@@ -503,6 +584,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/invoice-automator.js"></script>
+  <script src="/engagements.js"></script>
   <script>
     let rawInvoices = [];
     let currentFiltered = [];
@@ -523,6 +605,7 @@
       if (state.me.role === 'employee' && !financeAdmin) { showError('Receivables is only for Admin, Management and Finance Admin.'); return; }
       loadData();
       if (financeAdmin) startAutomator(state.me.role === 'admin'); // Management sees the dashboard only
+      startEngagements(); // Products & Services, Rate Cards, Engagement Plans (Management can look)
     }
 
     async function loadData() {
