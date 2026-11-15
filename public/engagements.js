@@ -193,9 +193,9 @@ function engOpenSplit(key) {
   const pcts = engSplitPcts(it);
   $id('splitItem').textContent = it.name || 'this list item';
   $id('splitRows').innerHTML = it.employeeIds.map((id) => `<div class="d-flex align-items-center gap-3 border rounded-3 p-2">
-      <span class="small fw-semibold text-truncate" style="width:35%">${esc(engEmployee(Number(id)) || '?')}</span>
-      <input type="range" min="0" max="100" step="5" value="${pcts[id]}" class="form-range flex-fill" aria-label="${esc(engEmployee(Number(id)) || '')} share" oninput="this.nextElementSibling.querySelector('input').value = this.value; engSplitTotal()">
-      <div class="input-group input-group-sm" style="width:6.5rem"><input type="number" min="0" max="100" step="0.01" class="form-control text-end" data-emp="${id}" value="${pcts[id]}" aria-label="${esc(engEmployee(Number(id)) || '')} percent" oninput="this.closest('.d-flex').querySelector('input[type=range]').value = this.value; engSplitTotal()"><span class="input-group-text">%</span></div>
+      <span class="small fw-semibold text-truncate flex-shrink-0" style="width:32%">${esc(engEmployee(Number(id)) || '?')}</span>
+      <input type="range" min="0" max="100" step="5" value="${pcts[id]}" class="form-range flex-fill" style="min-width:4rem" aria-label="${esc(engEmployee(Number(id)) || '')} share" oninput="this.nextElementSibling.querySelector('input').value = this.value; engSplitTotal()">
+      <div class="input-group input-group-sm flex-nowrap flex-shrink-0" style="width:7.5rem"><input type="number" min="0" max="100" step="0.01" class="form-control text-end px-2" style="min-width:4.5rem;color:#1a1a1a" data-emp="${id}" value="${pcts[id]}" aria-label="${esc(engEmployee(Number(id)) || '')} percent" oninput="this.closest('.d-flex').querySelector('input[type=range]').value = this.value; engSplitTotal()"><span class="input-group-text">%</span></div>
     </div>`).join('');
   engSplitTotal();
   modal('splitModal').show();
