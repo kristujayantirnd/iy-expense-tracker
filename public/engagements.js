@@ -21,6 +21,7 @@ async function engLoad(force = false) {
   if (E.data && !force) return engRenderAll();
   if (E.loading) return E.loading;
   E.loading = (async () => {
+    const finish = busy('Loading…');
     try {
       const res = await fetch('/api/engagements', { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
@@ -30,6 +31,7 @@ async function engLoad(force = false) {
       ['psList'].forEach((id) => ($id(id).innerHTML = `<div class="text-danger py-3">${esc(e.message)}</div>`));
     } finally {
       E.loading = null;
+      finish();
     }
   })();
   return E.loading;
@@ -50,6 +52,9 @@ function engRenderAll() {
 }
 
 async function engPost(body, done) {
+  if (E.busy) { toast('Still saving the last change, one moment…', false); return null; }
+  E.busy = true;
+  const finish = busy('Saving…');
   try {
     const res = await fetch('/api/engagements', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
@@ -60,6 +65,9 @@ async function engPost(body, done) {
   } catch (e) {
     toast(e.message, false);
     return null;
+  } finally {
+    E.busy = false;
+    finish();
   }
 }
 
@@ -101,13 +109,13 @@ function engRenderProducts() {
     $id('psList').innerHTML = `<div class="text-muted text-center py-4">${E.data.products.length ? 'Nothing matches the search.' : 'No products or services yet.' + (engCanEdit() ? ' Add the first one.' : '')}</div>`;
     return;
   }
-  $id('psList').innerHTML = list.map((p) => `
+  $id('psList').innerHTML = `<div class="text-end mb-2">${engAllToggles('ps:', list.map((p) => p.id), 'engRenderProducts')}</div>` + list.map((p) => `
     <div class="border rounded-3 mb-3">
-      <div class="d-flex justify-content-between align-items-start gap-2 p-3 pb-2">
-        <div><div class="fw-bold">${esc(p.name)}</div>${p.description ? `<div class="small text-muted">${esc(p.description)}</div>` : ''}</div>
+      <div class="d-flex justify-content-between align-items-start gap-2 px-3 py-2">
+        <div class="d-flex"><div class="pt-0">${engChevron(`ps:${p.id}`, 'engRenderProducts', p.name)}</div><div><span class="fw-bold">${esc(p.name)}</span> <span class="text-muted small ms-1">${p.items.length} item${p.items.length === 1 ? '' : 's'}</span>${p.description ? `<div class="small text-muted">${esc(p.description)}</div>` : ''}</div></div>
         ${engCanEdit() ? `<button class="btn btn-light border btn-sm" onclick="engOpenProduct(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
       </div>
-      <div class="table-responsive"><table class="table table-sm align-middle small mb-0">
+      <div class="table-responsive ${E.collapsed.has(`ps:${p.id}`) ? 'd-none' : ''}"><table class="table table-sm align-middle small mb-0">
         <thead class="bg-light"><tr><th class="ps-3">List item</th><th>Pricing model</th><th>Mandatory</th><th>Prerequisites</th><th>Employees</th><th>Notes</th></tr></thead>
         <tbody>${p.items.map((it) => `<tr><td class="ps-3">${esc(it.name)}</td><td>${E.data.pricing[it.pricingModel]}</td>
           <td>${it.mandatory ? '<span class="badge badge-soft badge-soft-pending">Y</span>' : '<span class="text-muted">N</span>'}</td>
@@ -224,21 +232,58 @@ function engCardAddItem(sel) {
   engRenderCard();
 }
 
-// The card's rows grouped by product, in master order.
-function engGroupRows(rows) {
+// Rows grouped by product in their own order (groups by first appearance), so rows and sections can be dragged.
+function engGroups(rows) {
   const groups = [];
-  for (const p of E.data.products) {
-    const items = p.items.map((m) => rows.find((r) => r.itemId === m.id)).filter(Boolean);
-    if (items.length) groups.push({ product: p, items });
+  for (const r of rows) {
+    const pid = engItem(r.itemId).productId;
+    let g = groups.find((x) => x.product.id === pid);
+    if (!g) groups.push((g = { product: E.data.products.find((p) => p.id === pid), items: [] }));
+    g.items.push(r);
   }
   return groups;
 }
+const engPlanGroups = engGroups;
+
+// Moves a whole product section before / after another one.
+function engMoveGroup(rows, fromPid, toPid) {
+  const gs = engGroups(rows);
+  const f = gs.findIndex((g) => g.product.id === fromPid), t = gs.findIndex((g) => g.product.id === toPid);
+  if (f < 0 || t < 0 || f === t) return false;
+  engMove(gs, f, t);
+  rows.splice(0, rows.length, ...gs.flatMap((g) => g.items));
+  return true;
+}
+// A row moves within its own product section.
+function engMoveRowIn(rows, from, to) {
+  if (from === to || !rows[from] || !rows[to] || engItem(rows[from].itemId).productId !== engItem(rows[to].itemId).productId) return false;
+  engMove(rows, from, to);
+  return true;
+}
+
+/* ---------- collapsible sections ---------- */
+// Keys: ps:<product id> (product list), rc:<product id> (rate card), cp:<product id> (plan). Kept for this browser.
+E.collapsed = new Set((() => { try { return JSON.parse(localStorage.getItem('engCollapsed') || '[]'); } catch { return []; } })());
+function engToggle(key, render) {
+  E.collapsed.has(key) ? E.collapsed.delete(key) : E.collapsed.add(key);
+  try { localStorage.setItem('engCollapsed', JSON.stringify([...E.collapsed])); } catch { /* private window */ }
+  window[render]();
+}
+function engToggleAll(prefix, ids, collapse, render) {
+  for (const id of ids) collapse ? E.collapsed.add(prefix + id) : E.collapsed.delete(prefix + id);
+  try { localStorage.setItem('engCollapsed', JSON.stringify([...E.collapsed])); } catch { /* private window */ }
+  window[render]();
+}
+const engChevron = (key, render, label) => `<button type="button" class="btn btn-link btn-sm p-0 me-2 text-reset" style="width:1rem" onclick="engToggle('${key}', '${render}')"
+  aria-expanded="${!E.collapsed.has(key)}" aria-label="${E.collapsed.has(key) ? 'Expand' : 'Collapse'} ${esc(label)}"><i class="fa-solid fa-chevron-${E.collapsed.has(key) ? 'right' : 'down'}"></i></button>`;
+const engAllToggles = (prefix, ids, render) => ids.length ? `<span class="small"><button type="button" class="btn btn-link btn-sm p-0" onclick='engToggleAll("${prefix}", ${JSON.stringify(ids)}, false, "${render}")'>Expand all</button> ·
+  <button type="button" class="btn btn-link btn-sm p-0" onclick='engToggleAll("${prefix}", ${JSON.stringify(ids)}, true, "${render}")'>Collapse all</button></span>` : '';
 
 function engRenderCard() {
   const c = E.card;
   const ro = !engCanEdit();
   const onCard = new Set(c.items.map((i) => i.itemId));
-  const groups = engGroupRows(c.items);
+  const groups = engGroups(c.items);
   const changed = (row, m) => row.pricingModel !== m.pricingModel || row.mandatory !== m.mandatory || row.prerequisites.slice().sort().join() !== m.prerequisites.slice().sort().join();
   const prereqOptions = (itemId) => [...onCard].filter((x) => x !== itemId).map((x) => ({ value: String(x), label: engItem(x).name, group: engItem(x).product }));
   $id('rcEditor').innerHTML = `
@@ -255,25 +300,28 @@ function engRenderCard() {
         <select id="rcAddProduct" class="form-select form-select-sm" style="min-width:18rem">${E.data.products.filter((p) => p.items.some((i) => !onCard.has(i.id))).map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('') || '<option value="">All products are on this card</option>'}</select></div>
       <button class="btn btn-light border btn-sm" onclick="engCardAddProduct()"><i class="fa-solid fa-plus me-1"></i>Add with its list items</button>
     </div>`}
-    <div class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i>Pricing model, Mandatory and Prerequisites start as in the master and can be changed for this rate card; changed tags are marked <span class="badge bg-warning-subtle text-warning-emphasis border">edited</span>.</div>
+    <div class="d-flex justify-content-between align-items-end gap-2 flex-wrap mb-2">
+      <div class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>Pricing model, Mandatory and Prerequisites start as in the master and can be changed for this rate card; changed tags are marked <span class="badge bg-warning-subtle text-warning-emphasis border">edited</span>.${ro ? '' : ' Drag a section or a row by its <i class="fa-solid fa-grip-vertical"></i> handle to reorder.'}</div>
+      ${engAllToggles('rc:', groups.map((g) => g.product.id), 'engRenderCard')}</div>
     <div class="table-responsive"><table class="table align-middle small mb-0">
       <thead class="bg-light"><tr><th style="min-width:13rem">List item</th><th style="width:10rem">Pricing model</th><th style="width:5.5rem">Mandatory</th><th style="min-width:13rem">Prerequisites</th><th style="width:10rem" class="text-end">Charge per unit (₹)</th><th style="width:3rem"></th></tr></thead>
       <tbody>${groups.map((g) => {
         const missing = g.product.items.filter((m) => !onCard.has(m.id));
-        return `<tr class="table-light"><td colspan="6"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-          <span class="fw-bold">${esc(g.product.name)}</span>
+        const shut = E.collapsed.has(`rc:${g.product.id}`);
+        return `<tr class="table-light" ${ro ? '' : engDragAttrs('cgrp', g.product.id)}><td colspan="6"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+          <span>${ro ? '' : engGrip()}${engChevron(`rc:${g.product.id}`, 'engRenderCard', g.product.name)}<span class="fw-bold">${esc(g.product.name)}</span> <span class="text-muted small ms-1">${g.items.length} item${g.items.length > 1 ? 's' : ''}</span></span>
           ${ro ? '' : `<div class="d-flex gap-2 align-items-center">${missing.length ? `<select class="form-select form-select-sm" style="width:auto" aria-label="Add a list item of ${esc(g.product.name)}" onchange="engCardAddItem(this)"><option value="">+ Add a removed item…</option>${missing.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>` : ''}
             <button class="btn btn-outline-danger btn-sm" onclick="engCardRemoveProduct(${g.product.id})"><i class="fa-solid fa-trash me-1"></i>Remove row</button></div>`}
-        </div></td></tr>` + g.items.map((row) => {
+        </div></td></tr>` + (shut ? '' : g.items.map((row) => {
           const m = engItem(row.itemId);
           const i = c.items.indexOf(row);
-          return `<tr><td class="ps-3">${esc(m.name)} ${changed(row, m) ? `<span class="badge bg-warning-subtle text-warning-emphasis border ms-1" title="Master: ${E.data.pricing[m.pricingModel]}, mandatory ${m.mandatory ? 'Y' : 'N'}">edited</span>${ro ? '' : ` <button type="button" class="btn btn-link btn-sm p-0 ms-1" onclick="engCardReset(${i})">reset</button>`}` : ''}</td>
+          return `<tr ${ro ? '' : engDragAttrs('crow', i)}><td class="ps-3">${ro ? '' : engGrip()}${esc(m.name)} ${changed(row, m) ? `<span class="badge bg-warning-subtle text-warning-emphasis border ms-1" title="Master: ${E.data.pricing[m.pricingModel]}, mandatory ${m.mandatory ? 'Y' : 'N'}">edited</span>${ro ? '' : ` <button type="button" class="btn btn-link btn-sm p-0 ms-1" onclick="engCardReset(${i})">reset</button>`}` : ''}</td>
             <td>${engPricingSelect(row.pricingModel, `E.card.items[${i}].pricingModel = this.value; engRenderCard()`, ro, `Pricing model, ${m.name}`)}</td>
             <td><select class="form-select form-select-sm" aria-label="Mandatory, ${esc(m.name)}" ${ro ? 'disabled' : ''} onchange="E.card.items[${i}].mandatory = this.value === 'Y'; engRenderCard()"><option ${row.mandatory ? '' : 'selected'}>N</option><option ${row.mandatory ? 'selected' : ''}>Y</option></select></td>
             <td>${engMulti(String(row.itemId), prereqOptions(row.itemId), row.prerequisites.map(String), 'engCardPrereq', ro)}</td>
             <td><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end" value="${row.unitPrice || ''}" placeholder="0" ${ro ? 'disabled' : ''} aria-label="Charge per unit, ${esc(m.name)}" oninput="E.card.items[${i}].unitPrice = Number(this.value) || 0"></td>
             <td>${ro ? '' : `<button class="btn btn-outline-danger btn-sm" onclick="engCardRemove(${i})" aria-label="Remove ${esc(m.name)}"><i class="fa-solid fa-xmark"></i></button>`}</td></tr>`;
-        }).join('');
+        }).join(''));
       }).join('') || `<tr><td colspan="6" class="text-muted text-center py-4">No products on this card yet.${ro ? '' : ' Add a product / service row above.'}</td></tr>`}</tbody>
     </table></div>`;
 }
@@ -290,7 +338,7 @@ function engCardRemoveProduct(pid) {
 
 async function engSaveCard() {
   // the rows in the order shown (grouped by product)
-  const items = engGroupRows(E.card.items).flatMap((g) => g.items);
+  const items = engGroups(E.card.items).flatMap((g) => g.items);
   const out = await engPost({ action: 'rateCard', rateCard: { ...E.card, items } }, 'Rate card saved');
   if (out) { E.card = null; engRenderCards(); }
 }
@@ -361,23 +409,33 @@ function engClosePlan() {
   engRenderPlans();
 }
 
-// Same rules as the server: prerequisites present, and the mandatory items of every product in the plan.
+// Same rules as the server: a taken item (units above 0) needs its prerequisites taken, and every product in the plan
+// needs its mandatory items taken. Also marks the rows at fault (E.plan.bad: item ids).
+const engTaken = (r) => r.pricingModel === 'fixed' || (Number(r.units) > 0 && (r.pricingModel !== 'per_head_month' || Number(r.months ?? 1) > 0));
 function engPlanProblems() {
-  const ids = new Set(E.plan.items.map((r) => r.itemId));
+  const ids = new Set(E.plan.items.filter(engTaken).map((r) => r.itemId));
+  const listed = new Set(E.plan.items.map((r) => r.itemId));
+  const bad = new Set();
   const card = E.data.rateCards.find((c) => c.id === E.plan.rateCardId);
   const cardProducts = new Set((card ? card.items : []).map((r) => engItem(r.itemId)?.productId));
   const out = [];
-  for (const r of E.plan.items) {
+  for (const r of E.plan.items.filter(engTaken)) {
     const missing = r.prerequisites.filter((x) => !ids.has(x) && engItem(x));
-    if (missing.length) out.push(`"${engItem(r.itemId).name}" needs ${missing.map((x) => `"${engItem(x).name}"`).join(', ')} first`);
+    if (missing.length) {
+      bad.add(r.itemId); missing.forEach((x) => bad.add(x));
+      out.push(`"${engItem(r.itemId).name}" needs ${missing.map((x) => `"${engItem(x).name}"${listed.has(x) ? ' (its units are 0)' : ''}`).join(', ')} first`);
+    }
   }
   for (const pid of new Set(E.plan.items.map((r) => engItem(r.itemId).productId))) {
     const p = E.data.products.find((x) => x.id === pid);
     for (const m of p.items.filter((i) => !ids.has(i.id))) {
       const required = cardProducts.has(pid) ? card.items.find((r) => r.itemId === m.id)?.mandatory === true : m.mandatory;
-      if (required) out.push(`"${m.name}" is mandatory for ${p.name}`);
+      if (required) out.push(`"${m.name}" is mandatory for ${p.name}${listed.has(m.id) ? ' (its units are 0)' : ''}`);
     }
   }
+  // mandatory items that are listed but have no units
+  for (const r of E.plan.items.filter((x) => !engTaken(x))) if (out.some((t) => t.startsWith(`"${engItem(r.itemId).name}" is mandatory`))) bad.add(r.itemId);
+  E.plan.bad = bad;
   return out;
 }
 
@@ -404,7 +462,16 @@ function engPlanAddItem(sel) {
   engRenderPlan();
 }
 
-function engPlanRemove(i) { E.plan.items.splice(i, 1); E.plan.dirty = true; engRenderPlan(); }
+function engPlanRemove(i) {
+  const gone = E.plan.items[i];
+  const needers = E.plan.items.filter((r) => r !== gone && r.prerequisites.includes(gone.itemId)).map((r) => engItem(r.itemId).name);
+  const name = engItem(gone.itemId).name;
+  if (needers.length && !confirm(`${needers.join(', ')} ${needers.length > 1 ? 'need' : 'needs'} "${name}" first. Remove it anyway? The plan can't be saved until that is sorted out.`)) return;
+  if (!needers.length && gone.mandatory && !confirm(`"${name}" is mandatory. Remove it anyway? The plan can't be saved without it.`)) return;
+  E.plan.items.splice(i, 1);
+  E.plan.dirty = true;
+  engRenderPlan();
+}
 
 // Live edits update the figures without re-rendering (so the cursor stays put).
 function engPlanSet(i, field, value) {
@@ -445,6 +512,7 @@ function engPlanFigures() {
       : `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>Signed up is ${engMoney(Math.abs(diff))} ${diff > 0 ? 'short of' : 'over'} the frozen total. Adjust the signed-up amounts, or</span> <button type="button" class="btn btn-sm btn-outline-primary ms-1" onclick="engBalance()">spread the difference</button>`;
   }
   const problems = engPlanProblems();
+  E.plan.items.forEach((r, i) => document.getElementById(`cp-actual-${i}`)?.closest('tr').classList.toggle('table-danger', E.plan.bad.has(r.itemId)));
   $id('cp-problems').innerHTML = problems.length ? `<div class="alert alert-warning small py-2 mb-3"><b>Before saving:</b> ${problems.map(esc).join('; ')}.</div>` : '';
 }
 
@@ -460,18 +528,6 @@ function engBalance() {
   if (left) { const big = rows.reduce((a, b) => (engSigned(b) > engSigned(a) ? b : a)); big.signedUp = engR2(engSigned(big) + left); }
   E.plan.dirty = true;
   engRenderPlan();
-}
-
-// A plan's rows grouped by product in the plan's own order (groups by first appearance), so rows can be dragged.
-function engPlanGroups(rows) {
-  const groups = [];
-  for (const r of rows) {
-    const pid = engItem(r.itemId).productId;
-    let g = groups.find((x) => x.product.id === pid);
-    if (!g) groups.push((g = { product: E.data.products.find((p) => p.id === pid), items: [] }));
-    g.items.push(r);
-  }
-  return groups;
 }
 
 /* ---------- drag to reorder (plans in the list, rows in a plan) ---------- */
@@ -499,11 +555,26 @@ function engDropRow(ev, to) {
   engPlanMoveRow(from, to);
 }
 function engPlanMoveRow(from, to) {
-  const rows = E.plan.items;
-  if (from === to || engItem(rows[from].itemId).productId !== engItem(rows[to].itemId).productId) return;
-  engMove(rows, from, to);
+  if (!engMoveRowIn(E.plan.items, from, to)) return;
   E.plan.dirty = true;
   engRenderPlan();
+}
+
+// Drag attributes for a row; dropping calls the kind's mover.
+const engDragAttrs = (kind, key) => `ondragstart="engDragStart(event, '${kind}', ${key})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, '${kind}')" ondrop="engDrop(event, '${kind}', ${key})"`;
+const ENG_MOVERS = {
+  row: (f, t) => engPlanMoveRow(f, t),
+  pgrp: (f, t) => { if (engMoveGroup(E.plan.items, f, t)) { E.plan.dirty = true; engRenderPlan(); } },
+  crow: (f, t) => { if (engMoveRowIn(E.card.items, f, t)) engRenderCard(); },
+  cgrp: (f, t) => { if (engMoveGroup(E.card.items, f, t)) engRenderCard(); },
+};
+function engDrop(ev, kind, to) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!engDrag || engDrag.kind !== kind) return;
+  const from = engDrag.key;
+  engDrag = null;
+  ENG_MOVERS[kind](from, to);
 }
 
 // Plans in the list: dropped onto another plan's row, saved straight away.
@@ -547,7 +618,9 @@ function engRenderPlan() {
     </div>
     ${frozen ? `<div class="alert alert-info small py-2 mb-3"><i class="fa-solid fa-lock me-1"></i>Frozen at <b>${engMoney(P.frozenTotal)}</b>${P.frozenBy ? ` by ${esc(P.frozenBy)}` : ''}${P.frozenOn ? ` on ${esc(P.frozenOn)}` : ''}. Items can still change, but the signed-up total must add up to this amount to save. <div id="cp-frozen" class="mt-1"></div></div>` : ''}
     <div id="cp-problems"></div>
-    ${ro ? '' : '<div class="small text-muted mb-2"><i class="fa-solid fa-grip-vertical me-1"></i>Drag a row by its handle to reorder it within its product / service.</div>'}
+    <div class="d-flex justify-content-between align-items-end gap-2 flex-wrap mb-2">
+      <div class="small text-muted">${ro ? '' : '<i class="fa-solid fa-grip-vertical me-1"></i>Drag a section, or a row within its section, by the handle to reorder.'}</div>
+      ${engAllToggles('cp:', groups.map((g) => g.product.id), 'engRenderPlan')}</div>
     ${ro ? '' : `<div class="d-flex gap-2 align-items-end mb-3 flex-wrap">
       <div><label class="form-label small fw-semibold" for="cpAddProduct">Add a product / service from the master</label>
         <select id="cpAddProduct" class="form-select form-select-sm" style="min-width:18rem">${addable.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('') || '<option value="">Everything in the master is in this plan</option>'}</select></div>
@@ -558,16 +631,17 @@ function engRenderPlan() {
         <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end">Variation</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
       <tbody>${groups.map((g) => {
         const missing = g.product.items.filter((m) => !inPlan.has(m.id));
-        return `<tr class="table-light"><td colspan="9"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
-          <span><span class="fw-bold">${esc(g.product.name)}</span> <span class="small ms-2" id="cp-sub-${g.product.id}"></span></span>
+        const shut = E.collapsed.has(`cp:${g.product.id}`);
+        return `<tr class="table-light" ${ro ? '' : engDragAttrs('pgrp', g.product.id)}><td colspan="9"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+          <span>${ro ? '' : engGrip()}${engChevron(`cp:${g.product.id}`, 'engRenderPlan', g.product.name)}<span class="fw-bold">${esc(g.product.name)}</span> <span class="small ms-2" id="cp-sub-${g.product.id}"></span></span>
           ${ro || !missing.length ? '' : `<select class="form-select form-select-sm" style="width:auto" aria-label="Add a list item of ${esc(g.product.name)}" onchange="engPlanAddItem(this)"><option value="">+ Add an item…</option>${missing.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>`}
-        </div></td></tr>` + g.items.map((r) => {
+        </div></td></tr>` + (shut ? '' : g.items.map((r) => {
           const i = P.items.indexOf(r);
           const m = engItem(r.itemId);
           const fixed = r.pricingModel === 'fixed';
           const needs = r.prerequisites.map((x) => engItem(x)?.name).filter(Boolean);
           const perMonth = r.pricingModel === 'per_head_month';
-          return `<tr ${ro ? '' : `ondragstart="engDragStart(event, 'row', ${i})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, 'row')" ondrop="engDropRow(event, ${i})"`}>
+          return `<tr ${ro ? '' : engDragAttrs('row', i)}>
             <td class="ps-3">${ro ? '' : engGrip()}${esc(m.name)}${r.mandatory ? ' <span class="badge badge-soft badge-soft-pending ms-1" style="font-size:10px">Mandatory</span>' : ''}
               ${needs.length ? `<div class="text-muted" style="font-size:11px">Needs: ${needs.map(esc).join(', ')}</div>` : ''}</td>
             <td>${E.data.pricing[r.pricingModel]}</td>
@@ -582,7 +656,7 @@ function engRenderPlan() {
             <td class="text-end" id="cp-var-${i}"></td>
             <td><textarea class="form-control form-control-sm" rows="1" maxlength="1000" ${ro ? 'disabled' : ''} aria-label="Notes, ${esc(m.name)}" oninput="engPlanSet(${i}, 'notes', this.value)">${esc(r.notes || '')}</textarea></td>
             <td>${ro ? '' : `<button class="btn btn-outline-danger btn-sm" onclick="engPlanRemove(${i})" aria-label="Remove ${esc(m.name)}"><i class="fa-solid fa-xmark"></i></button>`}</td></tr>`;
-        }).join('');
+        }).join(''));
       }).join('') || '<tr><td colspan="9" class="text-muted text-center py-4">No items. Add a product / service above.</td></tr>'}</tbody>
       <tfoot><tr class="fw-bold border-top"><td colspan="4" class="text-end">Total</td><td class="text-end" id="cp-total-actual"></td><td class="text-end" id="cp-total-signed"></td><td class="text-end" id="cp-total-var"></td><td colspan="2"></td></tr></tfoot>
     </table></div>`;

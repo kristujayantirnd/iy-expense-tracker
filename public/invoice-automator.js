@@ -24,16 +24,37 @@ const rowDraftOf = (r) => inv.rowDrafts[rowDraftKey(r)];
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const modal = (id) => bootstrap.Modal.getOrCreateInstance($id(id));
 
+// Result message: success stays 6 s, errors 15 s; either can be closed.
 function toast(msg, ok = true) {
   const el = $id('iyToast');
-  el.className = `position-fixed bottom-0 end-0 m-3 alert shadow ${ok ? 'alert-success' : 'alert-danger'}`;
-  el.innerText = msg;
+  el.className = `position-fixed bottom-0 end-0 m-3 alert shadow d-flex gap-2 align-items-start ${ok ? 'alert-success' : 'alert-danger'}`;
+  el.innerHTML = `<i class="fa-solid fa-${ok ? 'circle-check' : 'triangle-exclamation'} mt-1"></i><span style="flex:1"></span><button type="button" class="btn-close btn-sm" aria-label="Close" onclick="this.parentElement.classList.add('d-none')"></button>`;
+  el.querySelector('span').textContent = msg;
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => el.classList.add('d-none'), ok ? 4000 : 9000);
+  toast.t = setTimeout(() => el.classList.add('d-none'), ok ? 6000 : 15000);
+}
+
+// "Please wait" notice while the server is working; returns the function that ends it. Nested calls share one notice.
+function busy(msg = 'Saving…') {
+  const el = $id('iyBusy');
+  busy.n = (busy.n || 0) + 1;
+  el.querySelector('span').textContent = msg;
+  el.classList.remove('d-none');
+  document.body.style.cursor = 'progress';
+  let done = false;
+  return () => {
+    if (done) return;
+    done = true;
+    busy.n -= 1;
+    if (!busy.n) { el.classList.add('d-none'); document.body.style.cursor = ''; }
+  };
 }
 
 // POST an action; returns the reply, or null after showing the error.
 async function invPost(body, done) {
+  if (invPost.busy) { toast('Still working on the last change, one moment…', false); return null; }
+  invPost.busy = true;
+  const finish = busy(body && ['request', 'update', 'send', 'delete', 'import'].includes(body.action) ? 'Saving… (this can take up to a minute)' : 'Saving…');
   try {
     const res = await fetch('/api/client-invoices', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const data = await res.json().catch(() => ({}));
@@ -48,6 +69,9 @@ async function invPost(body, done) {
   } catch (e) {
     toast(e.message, false);
     return null;
+  } finally {
+    invPost.busy = false;
+    finish();
   }
 }
 

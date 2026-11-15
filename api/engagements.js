@@ -219,23 +219,30 @@ async function applyRateCard(db, me, body) {
 }
 
 // Rule checks for a plan's rows: prerequisites present, and the mandatory items of every product in the plan.
+// An item counts as taken only with a quantity: units above 0 (and months, for Per Head-Monthly); Fixed always counts.
+export const taken = (it) => it.pricingModel === 'fixed' || (Number(it.units) > 0 && (it.pricingModel !== 'per_head_month' || Number(it.months ?? 1) > 0));
+
 async function planProblems(db, rateCardId, items) {
-  const ids = new Set(items.map((i) => i.itemId));
+  const ids = new Set(items.filter(taken).map((i) => i.itemId));
+  const listed = new Set(items.map((i) => i.itemId));
   const all = await db`select i.id, i.name, i.product_id as "productId", i.mandatory, p.name as product from ps_items i join ps_products p on p.id = i.product_id`;
   const byId = new Map(all.map((i) => [i.id, i]));
   const card = rateCardId ? await db`select item_id, mandatory from rate_card_items where rate_card_id = ${rateCardId}` : [];
   const cardMandatory = new Map(card.map((r) => [r.item_id, r.mandatory]));
   const cardProducts = new Set(card.map((r) => byId.get(r.item_id)?.productId));
   const problems = [];
-  for (const it of items) {
+  // A taken item needs each prerequisite taken too (in the plan with units above 0).
+  for (const it of items.filter(taken)) {
     const missing = it.prerequisites.filter((p) => !ids.has(p) && byId.has(p));
-    if (missing.length) problems.push(`"${byId.get(it.itemId).name}" needs ${missing.map((m) => `"${byId.get(m).name}"`).join(', ')} first`);
+    if (missing.length) {
+      problems.push(`"${byId.get(it.itemId).name}" needs ${missing.map((m) => `"${byId.get(m).name}"${listed.has(m) ? ' (its units are 0)' : ''}`).join(', ')} first`);
+    }
   }
   // A product on the rate card follows the rate card's mandatory flags; one added from the master follows the master's.
   for (const productId of new Set(items.map((i) => byId.get(i.itemId).productId))) {
     for (const x of all.filter((i) => i.productId === productId && !ids.has(i.id))) {
       const required = cardProducts.has(productId) ? cardMandatory.get(x.id) === true : x.mandatory;
-      if (required) problems.push(`"${x.name}" is mandatory for ${x.product}`);
+      if (required) problems.push(`"${x.name}" is mandatory for ${x.product}${listed.has(x.id) ? ' (its units are 0)' : ''}`);
     }
   }
   return problems;
