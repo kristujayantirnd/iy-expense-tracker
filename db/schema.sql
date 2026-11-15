@@ -317,3 +317,6 @@ create table if not exists invoice_allocations (
 alter table plan_invoices add column if not exists particulars text not null default '';
 alter table plan_invoices add column if not exists due_date date;
 alter table plan_invoices add column if not exists po_number text not null default '';
+
+-- Revenue split between the employees mapped to a list item ({ "<user id>": percent }, adding up to 100; empty = equal shares).
+alter table ps_items add column if not exists employee_split jsonb not null default '{}';

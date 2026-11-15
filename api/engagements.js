@@ -42,7 +42,7 @@ export const signedOf = (it) => (it.signedUp == null ? actualOf(it) : r2(Number(
 async function readAll(db) {
   const [products, items, cards, cardItems, plans, planItems, clients, employees, schedule] = await db.transaction([
     db`select id, name, description from ps_products order by lower(name)`,
-    db`select id, product_id as "productId", name, pricing_model as "pricingModel", mandatory, prerequisites, notes, employee_ids as "employeeIds" from ps_items order by product_id, sort, id`,
+    db`select id, product_id as "productId", name, pricing_model as "pricingModel", mandatory, prerequisites, notes, employee_ids as "employeeIds", employee_split as "employeeSplit" from ps_items order by product_id, sort, id`,
     db`select id, name, description, to_char(updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn" from rate_cards order by lower(name)`,
     db`select rate_card_id as "rateCardId", item_id as "itemId", unit_price::float8 as "unitPrice", pricing_model as "pricingModel", mandatory, prerequisites
        from rate_card_items order by rate_card_id, sort, id`,
@@ -79,6 +79,21 @@ function employeesOf(v, staff) {
   return ids;
 }
 
+// Employee-wise revenue split of a list item: percents for its mapped employees adding up to 100, or {} (equal shares).
+function splitOf(v, employeeIds, name) {
+  if (!v || typeof v !== 'object' || employeeIds.length < 2) return {};
+  const out = {};
+  for (const id of employeeIds) {
+    const pct = Math.round(Number(v[id] ?? 0) * 100) / 100;
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) throw new Bad(`"${name}": each employee's share must be 0 to 100%`);
+    out[id] = pct;
+  }
+  const total = Object.values(out).reduce((s, x) => s + x, 0);
+  if (!Object.values(v).some((x) => Number(x) > 0)) return {};
+  if (Math.abs(total - 100) > 0.01) throw new Bad(`"${name}": the employee split adds up to ${Math.round(total * 100) / 100}%, it must be 100%`);
+  return out;
+}
+
 // The item ids that exist, so prerequisites and rows can only point at real items.
 const itemIds = async (db) => new Set((await db`select id from ps_items`).map((r) => r.id));
 
@@ -102,6 +117,7 @@ async function saveProduct(db, body) {
       mandatory: it.mandatory === true, prerequisites: [...new Set((Array.isArray(it.prerequisites) ? it.prerequisites : []).map(String))].filter((k) => k !== key),
       notes: text(it.notes, 1000, false, `notes of list item ${n + 1}`), employeeIds: employeesOf(it.employeeIds, staff) };
   });
+  for (const [n, it] of items.entries()) it.employeeSplit = splitOf(rows[n].employeeSplit, it.employeeIds, it.name);
   const lower = items.map((i) => i.name.toLowerCase());
   const dup = lower.find((n, i) => lower.indexOf(n) !== i);
   if (dup) throw new Bad(`"${items[lower.indexOf(dup)].name}" is in the list twice`);
@@ -149,7 +165,8 @@ async function saveProduct(db, body) {
   const toId = (k) => idOf.get(k) ?? Number(k);
   await db.transaction(items.map((it, n) => db`
     update ps_items set name = ${it.name}, pricing_model = ${it.pricingModel}, mandatory = ${it.mandatory},
-                        prerequisites = ${it.prerequisites.map(toId)}::int[], notes = ${it.notes}, employee_ids = ${it.employeeIds}::int[], sort = ${n}
+                        prerequisites = ${it.prerequisites.map(toId)}::int[], notes = ${it.notes}, employee_ids = ${it.employeeIds}::int[],
+                        employee_split = ${JSON.stringify(it.employeeSplit)}::jsonb, sort = ${n}
     where id = ${idOf.get(it.key)}`));
   return { notice: 'Product / service saved', id };
 }

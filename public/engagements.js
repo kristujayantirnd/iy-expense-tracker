@@ -122,7 +122,7 @@ function engRenderProducts() {
         <tbody>${p.items.map((it) => `<tr><td class="ps-3">${esc(it.name)}</td><td>${E.data.pricing[it.pricingModel]}</td>
           <td>${it.mandatory ? '<span class="badge badge-soft badge-soft-pending">Y</span>' : '<span class="text-muted">N</span>'}</td>
           <td>${it.prerequisites.map((x) => esc(engItem(x)?.name || '?')).join(', ') || '<span class="text-muted">–</span>'}</td>
-          <td>${it.employeeIds.map((x) => esc(engEmployee(x) || '?')).join(', ') || '<span class="text-muted">–</span>'}</td>
+          <td>${it.employeeIds.length > 1 ? engSplitText({ ...it, employeeIds: it.employeeIds.map(String) }) : it.employeeIds.map((x) => esc(engEmployee(x) || '?')).join(', ') || '<span class="text-muted">–</span>'}</td>
           <td style="white-space:pre-wrap;min-width:10rem">${esc(it.notes) || '<span class="text-muted">–</span>'}</td></tr>`).join('')
           || '<tr><td colspan="6" class="ps-3 text-muted">No list items yet.</td></tr>'}</tbody></table></div>
     </div>`).join('');
@@ -130,7 +130,7 @@ function engRenderProducts() {
 
 function engOpenProduct(id) {
   const p = id ? E.data.products.find((x) => x.id === id) : null;
-  E.product = { id: p ? p.id : null, items: (p ? p.items : []).map((it) => ({ key: String(it.id), id: it.id, name: it.name, pricingModel: it.pricingModel, mandatory: it.mandatory, prerequisites: it.prerequisites.map(String), notes: it.notes, employeeIds: it.employeeIds.map(String) })) };
+  E.product = { id: p ? p.id : null, items: (p ? p.items : []).map((it) => ({ key: String(it.id), id: it.id, name: it.name, pricingModel: it.pricingModel, mandatory: it.mandatory, prerequisites: it.prerequisites.map(String), notes: it.notes, employeeIds: it.employeeIds.map(String), employeeSplit: { ...(it.employeeSplit || {}) } })) };
   if (!p) engAddPsItem(false);
   $id('psTitle').textContent = p ? `Edit ${p.name}` : 'Add product / service';
   $id('psName').value = p ? p.name : '';
@@ -141,7 +141,7 @@ function engOpenProduct(id) {
 }
 
 function engAddPsItem(render = true) {
-  E.product.items.push({ key: `n${++E.newKey}`, id: null, name: '', pricingModel: 'per_head', mandatory: false, prerequisites: [], notes: '', employeeIds: [] });
+  E.product.items.push({ key: `n${++E.newKey}`, id: null, name: '', pricingModel: 'per_head', mandatory: false, prerequisites: [], notes: '', employeeIds: [], employeeSplit: {} });
   if (render) { engRenderPsItems(); $id('psItems').querySelector('tbody tr:last-child input')?.focus(); }
 }
 
@@ -162,14 +162,65 @@ function engRenderPsItems() {
       <td><select class="form-select form-select-sm" aria-label="Mandatory, item ${n + 1}" onchange="E.product.items[${n}].mandatory = this.value === 'Y'">
         <option ${it.mandatory ? '' : 'selected'}>N</option><option ${it.mandatory ? 'selected' : ''}>Y</option></select></td>
       <td>${engMulti(it.key, engPsPrereqOptions(it.key), it.prerequisites, 'engPsPrereq')}</td>
-      <td>${engMulti(it.key, E.data.employees.map((u) => ({ value: String(u.id), label: u.name })), it.employeeIds, 'engPsEmployees')}</td>
+      <td><div class="d-flex gap-1 align-items-center">${engMulti(it.key, E.data.employees.map((u) => ({ value: String(u.id), label: u.name })), it.employeeIds, 'engPsEmployees')}
+        <button type="button" class="btn btn-light border btn-sm px-2 flex-shrink-0 ${it.employeeIds.length > 1 ? '' : 'invisible'}" id="ps-split-${esc(it.key)}" onclick="engOpenSplit('${esc(it.key)}')"
+          title="Revenue split between these employees" aria-label="Revenue split between the employees of item ${n + 1}"><i class="fa-solid fa-circle-info"></i></button></div>
+        ${it.employeeIds.length > 1 ? `<div class="text-muted" style="font-size:10px">${engSplitText(it)}</div>` : ''}</td>
       <td><textarea class="form-control form-control-sm" rows="1" maxlength="1000" aria-label="Notes, item ${n + 1}" oninput="E.product.items[${n}].notes = this.value">${esc(it.notes)}</textarea></td>
       <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="engRemovePsItem(${n})" aria-label="Remove list item ${n + 1}"><i class="fa-solid fa-xmark"></i></button></td></tr>`).join('')
     + (rows.length ? '' : '<tr><td colspan="7" class="text-muted">No list items. Add one.</td></tr>') + '</tbody>';
 }
 
 function engPsPrereq(key, values) { E.product.items.find((i) => i.key === key).prerequisites = values; }
-function engPsEmployees(key, values) { E.product.items.find((i) => i.key === key).employeeIds = values; }
+function engPsEmployees(key, values) {
+  const it = E.product.items.find((i) => i.key === key);
+  it.employeeIds = values;
+  it.employeeSplit = {}; // a changed team starts again from equal shares
+  document.getElementById(`ps-split-${key}`)?.classList.toggle('invisible', values.length < 2);
+}
+
+/* ---------- employee-wise revenue split of a list item (like the expense dashboard's category split) ---------- */
+const engSplitPcts = (it) => {
+  const ids = it.employeeIds.map(String);
+  const set = ids.length > 1 && ids.some((id) => Number(it.employeeSplit?.[id]) > 0);
+  return Object.fromEntries(ids.map((id) => [id, set ? Number(it.employeeSplit[id]) || 0 : Math.round((100 / ids.length) * 100) / 100]));
+};
+const engSplitText = (it) => { const p = engSplitPcts(it); const set = Object.keys(it.employeeSplit || {}).length; return (set ? '' : 'Equal: ') + Object.entries(p).map(([id, v]) => `${esc(engEmployee(Number(id)) || '?')} ${v}%`).join(', '); };
+let engSplitKey = null;
+function engOpenSplit(key) {
+  engSplitKey = key;
+  const it = E.product.items.find((i) => i.key === key);
+  const pcts = engSplitPcts(it);
+  $id('splitItem').textContent = it.name || 'this list item';
+  $id('splitRows').innerHTML = it.employeeIds.map((id) => `<div class="d-flex align-items-center gap-3 border rounded-3 p-2">
+      <span class="small fw-semibold text-truncate" style="width:35%">${esc(engEmployee(Number(id)) || '?')}</span>
+      <input type="range" min="0" max="100" step="5" value="${pcts[id]}" class="form-range flex-fill" aria-label="${esc(engEmployee(Number(id)) || '')} share" oninput="this.nextElementSibling.querySelector('input').value = this.value; engSplitTotal()">
+      <div class="input-group input-group-sm" style="width:6.5rem"><input type="number" min="0" max="100" step="0.01" class="form-control text-end" data-emp="${id}" value="${pcts[id]}" aria-label="${esc(engEmployee(Number(id)) || '')} percent" oninput="this.closest('.d-flex').querySelector('input[type=range]').value = this.value; engSplitTotal()"><span class="input-group-text">%</span></div>
+    </div>`).join('');
+  engSplitTotal();
+  modal('splitModal').show();
+}
+function engSplitTotal() {
+  const total = Math.round([...$id('splitRows').querySelectorAll('input[type=number]')].reduce((s, x) => s + (Number(x.value) || 0), 0) * 100) / 100;
+  const b = $id('splitTotal');
+  b.textContent = `Total: ${total}%`;
+  b.className = `badge rounded-pill ${total === 100 ? 'bg-success-subtle text-success-emphasis' : total > 100 ? 'bg-danger-subtle text-danger-emphasis' : 'bg-warning-subtle text-warning-emphasis'} border`;
+  return total;
+}
+function engSplitEqual() {
+  const boxes = [...$id('splitRows').querySelectorAll('input[type=number]')];
+  const each = Math.floor((100 / boxes.length) * 100) / 100;
+  boxes.forEach((b, i) => { b.value = i === boxes.length - 1 ? Math.round((100 - each * (boxes.length - 1)) * 100) / 100 : each; b.closest('.d-flex').querySelector('input[type=range]').value = b.value; });
+  engSplitTotal();
+}
+function engSaveSplit() {
+  if (engSplitTotal() !== 100) return toast('The shares must add up to 100%', false);
+  const it = E.product.items.find((i) => i.key === engSplitKey);
+  it.employeeSplit = Object.fromEntries([...$id('splitRows').querySelectorAll('input[type=number]')].map((b) => [b.dataset.emp, Number(b.value) || 0]));
+  modal('splitModal').hide();
+  engRenderPsItems();
+  toast('Split set. Save the product / service to keep it.');
+}
 
 function engRemovePsItem(n) {
   const [gone] = E.product.items.splice(n, 1);
