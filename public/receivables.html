@@ -187,14 +187,6 @@
     /* status colours from the shared theme (readable on white) */
     .text-success { color: #047857 !important; } .text-warning { color: #b45309 !important; } .text-info { color: #0369a1 !important; } .text-danger { color: #cc0000 !important; }
     .metric-title.text-info, .metric-value.text-info { color: #0369a1 !important; }
-    /* Products & Services, Rate Cards, Engagement Plans: compact rows so more fits on screen */
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .table > :not(caption) > * > * { padding: .2rem .4rem; line-height: 1.25; }
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) :is(.form-control-sm, .form-select-sm) { padding-top: .1rem; padding-bottom: .1rem; min-height: 0; font-size: .78rem; line-height: 1.3; }
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .form-select-sm { padding-right: 1.6rem; background-position: right .4rem center; }
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .table .btn-sm { padding: .1rem .4rem; font-size: .75rem; line-height: 1.3; }
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) textarea.form-control-sm { height: 1.65rem; min-height: 1.65rem; resize: vertical; overflow: hidden; }
-    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) textarea.form-control-sm:focus { overflow: auto; }
-    :is(#products-sec, #ratecards-sec, #plans-sec) .table-light > td { padding-top: .25rem; padding-bottom: .25rem; }
   </style>
 </head>
 <body>
@@ -271,9 +263,10 @@
       <div class="col-6 col-md-3"><div class="metric-card card-total"><div class="metric-title">Total Revenue</div><div class="metric-value text-dark" id="metricTotal">₹0.00</div><small class="text-muted"><span id="countTotal">0</span> Invoices</small></div></div>
       <div class="col-6 col-md-3"><div class="metric-card card-received"><div class="metric-title text-success">Total Received</div><div class="metric-value text-success" id="metricReceived">₹0.00</div><small class="text-muted"><span id="countReceived">0</span> Settled</small></div></div>
       <div class="col-6 col-md-3"><div class="metric-card card-pending"><div class="metric-title" style="color: #b45309;">Receivables</div><div class="metric-value" style="color: #b45309;" id="metricPending">₹0.00</div><small class="text-muted"><span id="countPending">0</span> Pending</small></div></div>
-      <div class="col-6 col-md-3"><div class="metric-card card-upcoming"><div class="metric-title text-info">Upcoming (excl. GST)</div><div class="metric-value text-info" id="metricUpcoming">₹0.00</div><small class="text-muted"><span id="countUpcoming">0</span> Upcoming</small></div></div>
+      <div class="col-6 col-md-3"><div class="metric-card card-upcoming"><div class="metric-title text-info">Upcoming</div><div class="metric-value text-info" id="metricUpcoming">₹0.00</div><small class="text-muted"><span id="countUpcoming">0</span> Upcoming</small></div></div>
     </div>
 
+    <div class="small text-muted mb-3 text-end"><i class="fa-solid fa-circle-info me-1"></i>All amounts exclude GST.</div>
     <ul class="nav nav-pills nav-pills-modern mb-3 gap-2" id="dashboardTabs" role="tablist">
       <li class="nav-item"><button class="nav-link active" id="pending-tab" data-bs-toggle="tab" data-bs-target="#pending-sec" type="button"><i class="fa-solid fa-clock me-1"></i> Receivables (<span id="tabCountPending">0</span>)</button></li>
       <li class="nav-item"><button class="nav-link" id="upcoming-tab" data-bs-toggle="tab" data-bs-target="#upcoming-sec" type="button"><i class="fa-solid fa-calendar-plus me-1"></i> Upcoming Receivables (<span id="tabCountUpcoming">0</span>)</button></li>
@@ -283,10 +276,6 @@
       <li class="nav-item manage-only d-none"><button class="nav-link" id="manage-tab" data-bs-toggle="tab" data-bs-target="#manage-sec" type="button"><i class="fa-solid fa-pen-to-square me-1"></i> Manage Invoices</button></li>
       <li class="nav-item manage-only d-none"><button class="nav-link" id="clients-tab" data-bs-toggle="tab" data-bs-target="#clients-sec" type="button"><i class="fa-solid fa-address-book me-1"></i> Clients</button></li>
       <li class="nav-item manage-only d-none"><button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings-sec" type="button"><i class="fa-solid fa-gear me-1"></i> Automator Settings</button></li>
-      <!-- Products & Services, Rate Cards, Engagement Plans: Admin, Finance Admin and Management (shown by engagements.js) -->
-      <li class="nav-item eng-only d-none"><button class="nav-link" id="products-tab" data-bs-toggle="tab" data-bs-target="#products-sec" type="button"><i class="fa-solid fa-boxes-stacked me-1"></i> Products &amp; Services</button></li>
-      <li class="nav-item eng-only d-none"><button class="nav-link" id="ratecards-tab" data-bs-toggle="tab" data-bs-target="#ratecards-sec" type="button"><i class="fa-solid fa-tags me-1"></i> Rate Cards</button></li>
-      <li class="nav-item eng-only d-none"><button class="nav-link" id="plans-tab" data-bs-toggle="tab" data-bs-target="#plans-sec" type="button"><i class="fa-solid fa-handshake me-1"></i> Engagement Plans</button></li>
     </ul>
 
     <div class="tab-content" id="dashboardTabsContent">
@@ -295,7 +284,7 @@
         <div class="accordion month-accordion" id="accordionPending"></div>
       </div>
       <div class="tab-pane fade" id="upcoming-sec" role="tabpanel">
-        <div class="d-flex justify-content-end mb-3"><span class="fs-6 fw-semibold text-muted">Total Upcoming (excl. GST): <span id="secTotalUpcoming" class="text-info fw-bold">₹0.00</span></span></div>
+        <div class="d-flex justify-content-end mb-3"><span class="fs-6 fw-semibold text-muted">Total Upcoming: <span id="secTotalUpcoming" class="text-info fw-bold">₹0.00</span></span></div>
         <div class="accordion month-accordion" id="accordionUpcoming"></div>
       </div>
       <div class="tab-pane fade" id="received-sec" role="tabpanel">
@@ -429,84 +418,7 @@
           </details>
         </div>
       </div>
-      <div class="tab-pane fade" id="products-sec" role="tabpanel">
-        <div class="filter-card p-3">
-          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-            <p class="small text-muted mb-0">The master list of what we sell. Each product or service has list items, each tagged with a pricing model, whether it is mandatory, and the items it needs first.</p>
-            <div class="d-flex gap-2 align-items-center">
-              <div class="input-group input-group-sm" style="width:16rem">
-                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
-                <input type="search" id="psSearch" class="form-control border-start-0 ps-0" placeholder="Search products, items…" aria-label="Search products and services" oninput="engRenderProducts()">
-              </div>
-              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenProduct()"><i class="fa-solid fa-plus me-1"></i>Add product / service</button>
-            </div>
-          </div>
-          <div id="psList"></div>
-        </div>
-      </div>
-
-      <div class="tab-pane fade" id="ratecards-sec" role="tabpanel">
-        <div class="filter-card p-3" id="rcListBox">
-          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-            <p class="small text-muted mb-0">Rate cards are price lists built from the master: add products row by row, set the charge per unit for each list item, and change an item's tags for this card if needed.</p>
-            <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenCard()"><i class="fa-solid fa-plus me-1"></i>New rate card</button>
-          </div>
-          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="rcTable"></table></div>
-        </div>
-        <div class="filter-card p-3 d-none" id="rcEditor"></div>
-      </div>
-
-      <div class="tab-pane fade" id="plans-sec" role="tabpanel">
-        <div class="filter-card p-3" id="cpListBox">
-          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
-            <p class="small text-muted mb-0">A client's cost structure: copy a rate card to the client, set the units (head count, batches, hours, days, months), adjust the items, and record the signed-up amounts. Freeze it once agreed. Drag a plan by its <i class="fa-solid fa-grip-vertical"></i> handle to reorder the list.</p>
-            <div class="d-flex gap-2 align-items-center">
-              <div class="input-group input-group-sm" style="width:16rem">
-                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
-                <input type="search" id="cpSearch" class="form-control border-start-0 ps-0" placeholder="Search client, plan…" aria-label="Search engagement plans" oninput="engRenderPlans()">
-              </div>
-              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenApply()"><i class="fa-solid fa-copy me-1"></i>Apply rate card to client</button>
-            </div>
-          </div>
-          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="cpTable"></table></div>
-        </div>
-        <div class="filter-card p-3 d-none" id="cpEditor"></div>
-      </div>
     </div>
-  </div>
-
-  <!-- Products & Services / Rate Cards / Engagement Plans dialogs -->
-  <div class="modal fade" id="psModal" tabindex="-1" aria-labelledby="psTitle" aria-hidden="true">
-    <div class="modal-dialog modal-xl"><form class="modal-content" onsubmit="engSaveProduct(event)">
-      <div class="modal-header"><h2 class="modal-title h5" id="psTitle">Product / service</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-      <div class="modal-body">
-        <div class="row g-3 mb-3">
-          <div class="col-md-5"><label class="form-label small fw-semibold" for="psName">Name</label><input id="psName" class="form-control" maxlength="150" required></div>
-          <div class="col-md-7"><label class="form-label small fw-semibold" for="psDesc">Description</label><input id="psDesc" class="form-control" maxlength="1000"></div>
-        </div>
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <h3 class="h6 fw-bold mb-0">List items</h3>
-          <button type="button" class="btn btn-light border btn-sm" onclick="engAddPsItem()"><i class="fa-solid fa-plus me-1"></i>Add list item</button>
-        </div>
-        <div class="table-responsive"><table class="table align-middle small mb-0" id="psItems"></table></div>
-      </div>
-      <div class="modal-footer justify-content-between">
-        <button type="button" class="btn btn-outline-danger" id="psDelete" onclick="engDeleteProduct()"><i class="fa-solid fa-trash me-1"></i>Delete</button>
-        <div><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button> <button class="btn btn-primary fw-semibold">Save</button></div>
-      </div>
-    </form></div>
-  </div>
-  <div class="modal fade" id="applyModal" tabindex="-1" aria-labelledby="applyTitle" aria-hidden="true">
-    <div class="modal-dialog"><form class="modal-content" onsubmit="engApply(event)">
-      <div class="modal-header"><h2 class="modal-title h5" id="applyTitle">Apply a rate card to a client</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-      <div class="modal-body">
-        <label class="form-label small fw-semibold" for="apClient">Client</label><select id="apClient" class="form-select mb-3" required></select>
-        <label class="form-label small fw-semibold" for="apCard">Rate card</label><select id="apCard" class="form-select mb-3" required></select>
-        <label class="form-label small fw-semibold" for="apName">Plan name</label><input id="apName" class="form-control" maxlength="150" placeholder="e.g. FY27 Leadership Program (defaults to the rate card's name)">
-        <div class="form-text">The rate card is copied: later changes to it don't change this client's plan.</div>
-      </div>
-      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Copy to client</button></div>
-    </form></div>
   </div>
 
   <!-- Automator dialogs -->
@@ -562,6 +474,8 @@
         <p class="small text-muted mb-0" id="rowInfo"></p>
         <div id="rwDraftNote" class="alert alert-info small py-2 mb-0 d-none"><i class="fa-solid fa-pen-ruler me-1"></i>Showing the draft saved by <span id="rwDraftBy"></span>. It isn't in the sheet yet.
           <button type="button" class="btn btn-link btn-sm p-0 ms-1 align-baseline" onclick="discardRowDraft()">Discard draft</button></div>
+        <div id="rwDateBox" class="d-none"><label class="form-label small fw-semibold" for="rwDate">Invoice date</label><input id="rwDate" type="date" class="form-control">
+          <div class="form-text">Can be changed until the invoice is approved. The due date moves with it, and so does the Finance Team request if it hasn't been emailed yet.</div></div>
         <div><label class="form-label small fw-semibold" for="rwNumber">Invoice number</label><input id="rwNumber" class="form-control" maxlength="50" placeholder="VD/2026-27/…" oninput="rowReadiness()"></div>
         <div><label class="form-label small fw-semibold" for="rwPdf">Invoice PDF (Google Drive link)</label><input id="rwPdf" class="form-control" maxlength="500" placeholder="https://drive.google.com/file/d/…/view" oninput="rowReadiness(); rowBills()"></div>
         <div><label class="form-label small fw-semibold" for="rwGst">Amount with GST (₹)</label><input id="rwGst" type="number" min="0.01" step="0.01" class="form-control" oninput="rowReadiness()">
@@ -620,7 +534,6 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="/invoice-automator.js"></script>
-  <script src="/engagements.js"></script>
   <script>
     let rawInvoices = [];
     let currentFiltered = [];
@@ -641,7 +554,6 @@
       if (state.me.role === 'employee' && !financeAdmin) { showError('Receivables is only for Admin, Management and Finance Admin.'); return; }
       loadData();
       if (financeAdmin) startAutomator(state.me.role === 'admin'); // Management sees the dashboard only
-      startEngagements(); // Products & Services, Rate Cards, Engagement Plans (Management can look)
     }
 
     async function loadData() {
@@ -772,7 +684,7 @@
 
       const colorClass = type === 'received' ? 'text-success' : type === 'upcoming' ? 'text-info' : 'text-warning';
       const badgeClass = type === 'received' ? 'badge-soft-received' : type === 'upcoming' ? 'badge-soft-upcoming' : 'badge-soft-pending';
-      const amtHeaderTitle = type === 'upcoming' ? 'Amount (excl. GST)' : 'Amount Receivable';
+      const amtHeaderTitle = 'Amount (excl. GST)';
 
       let monthIndex = 0;
       Object.keys(monthGroups).sort().forEach((mKey) => {

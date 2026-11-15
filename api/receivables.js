@@ -12,7 +12,8 @@ const SCRIPT_URL = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
 const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
 
 // The dashboard's view of an invoice: received, upcoming (not raised to the client yet: a new entry or no invoice
-// number; counted without GST) or receivable (counted at the amount to be received).
+// number) or receivable. Every dashboard amount is the amount without GST (the amount with GST shows only in
+// Manage Invoices' Amount Receivable column).
 export function dashboardRow(r) {
   const status = String(r.status || '').trim();
   const isReceived = status.toLowerCase() === 'payment received';
@@ -20,7 +21,7 @@ export function dashboardRow(r) {
   const type = String(r.invoiceType || '');
   return {
     client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: dmy(r.invoiceDateIso), dueDate: dmy(r.dueDateIso), dueDateIso: r.dueDateIso || '',
-    amtReceivable: isUpcoming ? r.amount || 0 : r.toReceive || r.withGst || r.amount || 0, isUpcoming, isReceived, pdfLink: r.pdfUrl || '', rawStatus: status,
+    amtReceivable: r.amount || 0, isUpcoming, isReceived, pdfLink: r.pdfUrl || '', rawStatus: status,
     invoiceCategory: isReimbType(type) ? 'reimbursement' : /service/i.test(type) ? 'service' : 'other',
   };
 }

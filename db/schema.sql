@@ -291,3 +291,24 @@ create table if not exists receivable_invoices (
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
+
+-- Revenue Planner: a frozen engagement plan's invoice schedule (the signed-up total split into dated invoices).
+-- "Generate invoices" turns each row into a Finance Team request + a NEW_ENTRY invoice (invoice_id). Each generated
+-- invoice is accounted to the plan's list items in proportion to their signed-up amounts (invoice_allocations), which
+-- feeds the product / service and employee revenue views.
+create table if not exists plan_invoices (
+  id serial primary key,
+  plan_id int not null references client_plans(id) on delete cascade,
+  seq int not null,
+  amount numeric not null,
+  invoice_date date not null,
+  invoice_id int references receivable_invoices(id) on delete set null,
+  unique (plan_id, seq)
+);
+create table if not exists invoice_allocations (
+  invoice_id int not null references receivable_invoices(id) on delete cascade,
+  plan_id int references client_plans(id) on delete set null,
+  item_id int not null references ps_items(id),
+  amount numeric not null,
+  primary key (invoice_id, item_id)
+);

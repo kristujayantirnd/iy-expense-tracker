@@ -245,15 +245,15 @@ async function act(db, me, body) {
 
 /* ================= Receivables in the database (db mode) ================= */
 
-const isDb = async (db) => (await getSetting(db, 'receivablesSource')) === 'db';
-const DUE_DAYS = 45; // Due Date = Invoice Date + 45 days
+export const isDb = async (db) => (await getSetting(db, 'receivablesSource')) === 'db';
+export const DUE_DAYS = 45; // Due Date = Invoice Date + 45 days
 const r2 = (n) => Math.round(n * 100) / 100;
 export const isReimbType = (t) => /reimburs/i.test(t || '');
 // Amount to be received: amount with GST - 10% TDS on the amount without GST; reimbursements carry no TDS.
 export const toBeReceived = (withGst, amount, reimb) => r2(reimb ? withGst : withGst - 0.1 * amount);
 const fileId = (url) => (String(url || '').match(/[-\w]{25,}/) || [])[0] || null;
 const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
-const typeSentence = (invoiceType) => (invoiceType === 'Service' ? 'for the service rendered.' : 'for reimbursement of the expenses incurred.');
+export const typeSentence = (invoiceType) => (invoiceType === 'Service' ? 'for the service rendered.' : 'for reimbursement of the expenses incurred.');
 
 export async function invoiceRecords(db, id = null) {
   return db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as "invoiceDateIso", category,
@@ -283,7 +283,7 @@ async function requestRow(db, id) {
 }
 
 // Writes a record's sheet row; a failure is kept on the record (for Retry sheet sync) and returned, never thrown.
-async function pushExtract(db, id) {
+export async function pushExtract(db, id) {
   const [r] = await invoiceRecords(db, id);
   if (!r) return '';
   try {
@@ -296,7 +296,7 @@ async function pushExtract(db, id) {
     return msg;
   }
 }
-async function pushRequest(db, id, sendNow = false) {
+export async function pushRequest(db, id, sendNow = false) {
   const row = await requestRow(db, id);
   if (!row) return { error: '' };
   try {
@@ -379,8 +379,22 @@ const DB_ACTIONS = {
     if (['APPROVED', 'REMINDER'].includes(status) && missing.length) throw new Bad(`Add the ${missing.join(', ')} before choosing this status`);
     const toReceive = withGst > 0 ? toBeReceived(withGst, r.amount, isReimbType(r.invoiceType)) : r.toReceive;
     const received = status === 'Payment Received' ? date(u.receivedDate) : null;
+    // The invoice date can change until the invoice is approved (the due date follows; so does an unsent Finance Team request).
+    let invoiceDate = r.invoiceDateIso;
+    const moved = Boolean(u.invoiceDate) && u.invoiceDate !== r.invoiceDateIso;
+    if (moved) {
+      if (r.status.toUpperCase() !== 'NEW_ENTRY') throw new Bad('The invoice date can only be changed until the invoice is approved');
+      invoiceDate = date(u.invoiceDate);
+    }
     await db`update receivable_invoices set invoice_number = ${invoiceNumber}, pdf_url = ${pdfUrl}, with_gst = ${withGst}, to_receive = ${toReceive},
-               status = ${status}, received_date = ${received}, draft = null, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+               status = ${status}, received_date = ${received}, invoice_date = ${invoiceDate},
+               due_date = case when ${moved} then ${invoiceDate}::date + ${DUE_DAYS}::int else due_date end,
+               draft = null, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+    if (moved) {
+      await db`update plan_invoices set invoice_date = ${invoiceDate} where invoice_id = ${r.id}`;
+      const req = r.requestId ? await db`update invoice_requests set invoice_date = ${invoiceDate} where id = ${r.requestId} and upper(email_status) <> 'SENT' returning id` : [];
+      if (req.length) await pushRequest(db, r.requestId);
+    }
     const sheetErr = await pushExtract(db, r.id);
     const bills = u.attachBills === true && status === 'APPROVED' ? await attachBillsDb(db, r.id, u.rebuildBills === true) : '';
     return { notice: 'Invoice saved' + bills + (sheetErr ? `. The sheet copy failed (${sheetErr}); use Retry sheet sync.` : '') };

@@ -1,13 +1,15 @@
 // Receivables · Products & Services, Rate Cards and Client Engagement Plans.
 // Admin and Finance Admin change them; Management can look.
 // GET                         -> { products, rateCards, plans, clients, canEdit, admin }
-// POST {action, …}            -> product | deleteProduct | rateCard | deleteRateCard | apply | plan | freeze | unfreeze | deletePlan | reorderPlans
+// GET ?view=revenue           -> { invoices, allocations } for the revenue dashboard (plus the masters)
+// POST {action, …}            -> product | deleteProduct | rateCard | deleteRateCard | apply | plan | freeze | unfreeze | deletePlan | reorderPlans | generateInvoices
 //
 // Product items carry a pricing model, a mandatory flag and prerequisites (other item ids). A rate card copies
 // those attributes per item (they may be changed there) and adds a unit price. A client plan copies a rate card,
 // then takes units per item: actual = unit price x units; signed up starts as the actual and may be changed.
 // Once frozen, the plan's signed-up total is fixed: later edits must still add up to it.
 import { sql, requireUser, isFinanceAdmin } from './_lib.js';
+import { isDb, pushExtract, pushRequest, typeSentence, DUE_DAYS } from './client-invoices.js';
 
 class Bad extends Error {}
 export const PRICING = { per_head: 'Per Head', per_head_month: 'Per Head-Monthly', per_batch: 'Per Batch', per_hour: 'Per Hour', per_day: 'Per Day', per_month: 'Per Month', fixed: 'Fixed' };
@@ -38,7 +40,7 @@ export const actualOf = (it) => r2(Number(it.unitPrice) * Number(it.units) * (it
 export const signedOf = (it) => (it.signedUp == null ? actualOf(it) : r2(Number(it.signedUp)));
 
 async function readAll(db) {
-  const [products, items, cards, cardItems, plans, planItems, clients, employees] = await db.transaction([
+  const [products, items, cards, cardItems, plans, planItems, clients, employees, schedule] = await db.transaction([
     db`select id, name, description from ps_products order by lower(name)`,
     db`select id, product_id as "productId", name, pricing_model as "pricingModel", mandatory, prerequisites, notes, employee_ids as "employeeIds" from ps_items order by product_id, sort, id`,
     db`select id, name, description, to_char(updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn" from rate_cards order by lower(name)`,
@@ -54,11 +56,16 @@ async function readAll(db) {
        from client_plan_items order by plan_id, sort, id`,
     db`select id, name from clients order by lower(name)`,
     db`select id, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where active order by 2`,
+    db`select s.plan_id as "planId", s.seq, s.amount::float8 as amount, to_char(s.invoice_date, 'YYYY-MM-DD') as "invoiceDate", s.invoice_id as "invoiceId",
+              r.status, r.invoice_number as "invoiceNumber", to_char(r.invoice_date, 'YYYY-MM-DD') as "currentDate"
+       from plan_invoices s left join receivable_invoices r on r.id = s.invoice_id order by s.plan_id, s.seq`,
   ]);
   return {
     products: products.map((p) => ({ ...p, items: items.filter((i) => i.productId === p.id) })),
     rateCards: cards.map((c) => ({ ...c, items: cardItems.filter((i) => i.rateCardId === c.id) })),
-    plans: plans.map((p) => ({ ...p, items: planItems.filter((i) => i.planId === p.id) })),
+    plans: plans.map((p) => ({ ...p, items: planItems.filter((i) => i.planId === p.id),
+      // a generated row shows its invoice's current date (it can be moved in Manage Invoices until approved)
+      schedule: schedule.filter((x) => x.planId === p.id).map((x) => ({ ...x, invoiceDate: x.currentDate || x.invoiceDate })) })),
     clients,
     employees,
   };
@@ -294,13 +301,81 @@ async function savePlan(db, me, body) {
       throw new Bad(`This plan is frozen at ${rupees(plan.frozenTotal)}. The signed-up column adds up to ${rupees(total)}, ${rupees(Math.abs(diff))} ${diff > 0 ? 'short' : 'over'}. Adjust the signed-up amounts so they add up to the frozen total.`);
     }
   }
+  const schedule = Array.isArray(p.schedule) ? await cleanSchedule(db, id, p.schedule) : null;
   await db.transaction([
+    ...(schedule ? [db`delete from plan_invoices where plan_id = ${id} and invoice_id is null`,
+      ...schedule.rows.map((x, n) => db`insert into plan_invoices (plan_id, seq, amount, invoice_date) values (${id}, ${schedule.start + n}, ${x.amount}, ${x.invoiceDate})`)] : []),
     db`update client_plans set name = ${text(p.name, 150, true, 'plan name')}, notes = ${text(p.notes, 2000, false, 'notes')}, updated_by = ${me.id}, updated_at = now() where id = ${id}`,
     db`delete from client_plan_items where plan_id = ${id}`,
     ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, signed_up, notes, sort)
                                values (${id}, ${it.itemId}, ${it.pricingModel}, ${it.mandatory}, ${it.prerequisites}::int[], ${it.unitPrice}, ${it.units}, ${it.months}, ${it.signedUp}, ${it.notes}, ${n})`),
   ]);
   return { notice: plan.frozenTotal != null ? 'Saved. The signed-up total still matches the frozen total.' : 'Plan saved', id };
+}
+
+// The invoice schedule's rows not generated yet: [{ amount, invoiceDate }] (generated rows stay as they are).
+async function cleanSchedule(db, planId, rows) {
+  if (rows.length > 60) throw new Bad('Up to 60 invoices per plan');
+  const [{ max }] = await db`select coalesce(max(seq), 0)::int as max from plan_invoices where plan_id = ${planId} and invoice_id is not null`;
+  return { start: max + 1, rows: rows.filter((x) => !x.invoiceId).map((x, n) => {
+    const amount = num(x.amount, 1e10, `Invoice ${n + 1} amount`);
+    if (!(amount > 0)) throw new Bad(`Invoice ${n + 1}: the amount must be above 0`);
+    const d = String(x.invoiceDate || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) throw new Bad(`Invoice ${n + 1}: pick a date`);
+    return { amount, invoiceDate: d };
+  }) };
+}
+
+// Turns a frozen plan's schedule rows into Finance Team requests + NEW_ENTRY invoices (rows already generated are
+// skipped), each accounted to the plan's items in proportion to their signed-up amounts.
+async function generateInvoices(db, me, body) {
+  const id = intId(body.id, 'plan');
+  if (!(await isDb(db))) throw new Bad('Receivables must be moved to the database first (Receivables → Automator Settings)');
+  const [plan] = await db`select p.name, p.frozen_total::float8 as "frozenTotal", c.name as client from client_plans p join clients c on c.id = p.client_id where p.id = ${id}`;
+  if (!plan) throw new Bad('That plan no longer exists');
+  if (plan.frozenTotal == null) throw new Bad('Freeze the plan first, so the signed-up total the invoices add up to is fixed');
+  const rows = await db`select id, seq, amount::float8 as amount, to_char(invoice_date, 'YYYY-MM-DD') as d, invoice_id from plan_invoices where plan_id = ${id} order by seq`;
+  if (!rows.length) throw new Bad('Set the number of invoices and their dates, then save the plan');
+  const total = r2(rows.reduce((s, x) => s + x.amount, 0));
+  if (Math.round(total * 100) !== Math.round(plan.frozenTotal * 100)) {
+    throw new Bad(`The invoices add up to ${rupees(total)} but the plan is frozen at ${rupees(plan.frozenTotal)}. Adjust the invoice amounts and save.`);
+  }
+  const todo = rows.filter((x) => !x.invoice_id);
+  if (!todo.length) throw new Bad('All the invoices of this plan have been generated already');
+  const items = (await db`select item_id as "itemId", pricing_model as "pricingModel", unit_price::float8 as "unitPrice", units::float8 as units,
+                                 months::float8 as months, signed_up::float8 as "signedUp" from client_plan_items where plan_id = ${id} order by sort`)
+    .map((it) => ({ itemId: it.itemId, signed: signedOf(it) })).filter((it) => it.signed > 0);
+  const base = r2(items.reduce((s, it) => s + it.signed, 0));
+  if (!(base > 0)) throw new Bad('The plan has no signed-up amounts to account the invoices to');
+  let sheetErrors = 0;
+  for (const x of todo) {
+    const k = rows.indexOf(x) + 1;
+    const [q] = await db`insert into invoice_requests (invoice_type, client, invoice_date, description, po_number, amount)
+                         values ('Service', ${plan.client}, ${x.d}, ${`${plan.name} - Invoice ${k} of ${rows.length}`}, 'N/A', ${x.amount}) returning id`;
+    const [inv] = await db`insert into receivable_invoices (client, invoice_date, amount, due_date, invoice_type, status, request_id, updated_by)
+                           values (${plan.client}, ${x.d}, ${x.amount}, ${x.d}::date + ${DUE_DAYS}::int, ${typeSentence('Service')}, 'NEW_ENTRY', ${q.id}, ${me.id}) returning id`;
+    // proportional shares; the rounding paise go to the largest item so the shares add up to the invoice
+    const shares = items.map((it) => ({ itemId: it.itemId, amount: r2((x.amount * it.signed) / base) }));
+    const gap = r2(x.amount - shares.reduce((s, a) => s + a.amount, 0));
+    if (gap) shares.reduce((a, b) => (b.amount > a.amount ? b : a)).amount = r2(shares.reduce((a, b) => (b.amount > a.amount ? b : a)).amount + gap);
+    await db.transaction([
+      ...shares.map((a) => db`insert into invoice_allocations (invoice_id, plan_id, item_id, amount) values (${inv.id}, ${id}, ${a.itemId}, ${a.amount})`),
+      db`update plan_invoices set invoice_id = ${inv.id} where id = ${x.id}`,
+    ]);
+    if ((await pushRequest(db, q.id)).error) sheetErrors++;
+    if (await pushExtract(db, inv.id)) sheetErrors++;
+  }
+  return { id, notice: `${todo.length} invoice${todo.length > 1 ? 's' : ''} generated for ${plan.client}: Finance Team requests and new entries in Manage Invoices.`
+    + (sheetErrors ? ` ${sheetErrors} sheet cop${sheetErrors > 1 ? 'ies' : 'y'} failed; use Retry sheet sync in Manage Invoices.` : '') };
+}
+
+// Revenue dashboard: every invoice (dashboard status and amount without GST) and how plan invoices split across items.
+async function revenue(db) {
+  const [invoices, allocations] = await db.transaction([
+    db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as date, status, amount::float8 as amount from receivable_invoices`,
+    db`select invoice_id as "invoiceId", item_id as "itemId", plan_id as "planId", amount::float8 as amount from invoice_allocations`,
+  ]);
+  return { invoices, allocations };
 }
 
 const rupees = (n) => '₹' + Number(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -329,6 +404,7 @@ async function act(db, me, body) {
     case 'apply': return applyRateCard(db, me, body);
     case 'plan': return savePlan(db, me, body);
     case 'freeze': return freeze(db, me, body);
+    case 'generateInvoices': return generateInvoices(db, me, body);
     case 'unfreeze': {
       if (me.role !== 'admin') throw new Bad('Only the admin can unfreeze a plan');
       await db`update client_plans set frozen_total = null, frozen_at = null, frozen_by = null where id = ${intId(body.id)}`;
@@ -344,6 +420,8 @@ async function act(db, me, body) {
       const id = intId(body.id, 'plan');
       const [p] = await db`select frozen_total from client_plans where id = ${id}`;
       if (p?.frozen_total != null && me.role !== 'admin') throw new Bad('Frozen plans can only be deleted by the admin');
+      const [g] = await db`select count(*)::int as n from plan_invoices where plan_id = ${id} and invoice_id is not null`;
+      if (g.n) throw new Bad(`This plan has generated ${g.n} invoice(s), so it is kept for the revenue figures`);
       await db`delete from client_plans where id = ${id}`;
       return { notice: 'Plan deleted' };
     }
@@ -360,6 +438,7 @@ export default async function handler(req, res) {
   const db = sql();
   try {
     let out = {};
+    if (req.method === 'GET' && req.query.view === 'revenue') out = await revenue(db);
     if (req.method === 'POST') {
       if (!canEdit) return res.status(403).json({ error: 'Only Admin and Finance Admin can change these' });
       out = await act(db, me, req.body);

@@ -1,5 +1,5 @@
 // Module switcher in every page header: only the modules this person may open.
-// renderModules(navElement, { role, ptLinked, extraRoles, current: 'tracker' | 'priorities' | 'payouts' | 'projects' | 'receivables' })
+// renderModules(navElement, { role, ptLinked, extraRoles, current: 'tracker' | 'priorities' | 'payouts' | 'projects' | 'receivables' | 'revenue' })
 function renderModules(el, { role, ptLinked, extraRoles = [], current }) {
   const staff = role === 'admin' || role === 'management';
   const mods = [
@@ -8,6 +8,7 @@ function renderModules(el, { role, ptLinked, extraRoles = [], current }) {
     { key: 'payouts', label: 'Invoicing', href: '/payouts.html', icon: 'fa-file-invoice', show: true },
     { key: 'projects', label: 'Project Tracker', href: '/projects.html', icon: 'fa-diagram-project', show: staff || ptLinked },
     { key: 'receivables', label: 'Receivables', href: '/receivables.html', icon: 'fa-hand-holding-dollar', show: staff || extraRoles.includes('finance_admin') },
+    { key: 'revenue', label: 'Revenue Planner', href: '/revenue.html', icon: 'fa-chart-line', show: staff || extraRoles.includes('finance_admin') },
   ].filter((m) => m.show);
   el.setAttribute('aria-label', 'Modules');
   el.innerHTML = mods.length < 2 ? '' : mods.map((m) => {

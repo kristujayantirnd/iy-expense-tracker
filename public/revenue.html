@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invincible YOU · Revenue Planner</title>
+  <link rel="icon" href="/iy-lockup.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Literata:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Tailwind only styles the Invincible YOU header here; the dashboard below is Bootstrap.
+    // preflight/container/visibility off so Tailwind can't override Bootstrap (e.g. .collapse, .container).
+    tailwind.config = {
+      corePlugins: { preflight: false, container: false, visibility: false },
+      theme: {
+        extend: {
+          colors: {
+            slate: { 100: '#1a1a1a', 200: '#1a1a1a', 300: '#364153', 400: '#484848', 500: '#6a7282', 600: '#8a8a8a', 700: '#e5e7eb', 800: '#f3f4f6', 900: '#ffffff', 950: '#fafafa' },
+            blue: { 50: '#f8eefb', 100: '#f0dcf6', 200: '#e0b8ec', 300: '#680087', 400: '#680087', 500: '#7a1a9a', 600: '#680087', 700: '#550070', 800: '#440158', 900: '#190021', 950: '#10001a' },
+          }
+        }
+      }
+    }
+  </script>
+  <script src="/modules.js"></script>
+  <style>
+    :root {
+      --primary-accent: #6366f1;
+      --primary-accent-bg: #eef2ff;
+      --success-accent: #10b981;
+      --pending-accent: #f59e0b;
+      --upcoming-accent: #0ea5e9;
+      --card-border: #e2e8f0;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+    }
+    body {
+      background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text-main);
+      min-height: 100vh;
+    }
+    /* Invincible YOU header (same as the other modules) */
+    .iy-header { background: rgba(255,255,255,.9); border-bottom: 1px solid #e5e7eb; position: sticky; top: 0; z-index: 1000; font-family: 'Source Sans 3', Arial, sans-serif; }
+    .iy-header h1 { font-family: Literata, Georgia, serif; font-size: 1rem; font-weight: 600; margin: 0; color: #1a1a1a; }
+    .iy-header a { text-decoration: none; }
+    .iy-icon-btn { padding: .5rem; border-radius: .5rem; color: #484848; background: none; border: 0; }
+    .iy-icon-btn:hover { background: #f3f4f6; color: #1a1a1a; }
+
+    .metric-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; padding: 1.1rem 1.25rem; box-shadow: 0 4px 15px -2px rgba(0,0,0,.03); transition: all .25s cubic-bezier(.4,0,.2,1); position: relative; overflow: hidden; }
+    .metric-card:hover { transform: translateY(-3px); box-shadow: 0 12px 25px -5px rgba(0,0,0,.06); }
+    .metric-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px; }
+    .card-total::before { background: var(--primary-accent); }
+    .card-received::before { background: var(--success-accent); }
+    .card-pending::before { background: var(--pending-accent); }
+    .card-upcoming::before { background: var(--upcoming-accent); }
+    .metric-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+    .metric-value { font-size: 1.45rem; font-weight: 700; letter-spacing: -.02em; margin-top: .2rem; }
+
+    .filter-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.02); }
+    .form-control, .form-select { border-radius: 10px; border: 1px solid #cbd5e1; font-size: .875rem; padding: .5rem .75rem; transition: all .2s ease; }
+    .form-control:focus { border-color: var(--primary-accent); box-shadow: 0 0 0 3px rgba(99,102,241,.12); }
+
+    .category-toggle-group { background: #f1f5f9; border-radius: 12px; padding: 4px; display: inline-flex; }
+    .category-toggle-item { padding: 6px 14px; border-radius: 8px; font-size: .825rem; font-weight: 600; cursor: pointer; user-select: none; transition: all .2s ease; }
+    .category-toggle-item:has(input:checked) { background: #fff; color: var(--text-main); box-shadow: 0 2px 6px rgba(0,0,0,.06); }
+    .category-toggle-item:has(input:focus-visible) { outline: 2px solid var(--primary-accent); }
+
+    .nav-pills-modern .nav-link { color: var(--text-muted); font-weight: 600; font-size: .9rem; border-radius: 12px; padding: .6rem 1.2rem; transition: all .2s ease; }
+    .nav-pills-modern .nav-link:hover { background: rgba(255,255,255,.6); color: var(--text-main); }
+    .nav-pills-modern .nav-link.active { background: #fff; color: var(--primary-accent); box-shadow: 0 4px 12px rgba(0,0,0,.05); border: 1px solid var(--card-border); }
+
+    .accordion-item { border: 1px solid var(--card-border) !important; border-radius: 14px !important; overflow: hidden; margin-bottom: .85rem; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.015); }
+    .month-header-btn { background: #fff !important; padding: 1rem 1.25rem; }
+    .month-header-btn:not(.collapsed) { background: #f8fafc !important; box-shadow: none !important; }
+    .client-header-btn { background: #f8fafc !important; padding: .75rem 1rem; }
+    .dashboard-table { table-layout: fixed; width: 100%; }
+    .dashboard-table th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); border-bottom: 1px solid var(--card-border); }
+    .dashboard-table td { font-size: .875rem; vertical-align: middle; white-space: nowrap; }
+    .col-inv { width: 18%; } .col-date { width: 15%; } .col-due { width: 22%; }
+    .col-amt { width: 20%; text-align: right; } .col-status { width: 13%; text-align: center; } .col-action { width: 12%; text-align: center; }
+
+    .badge-soft { padding: .35em .7em; font-weight: 600; border-radius: 8px; font-size: .75rem; }
+    .badge-soft-pending { background: #fef3c7; color: #92400e; }
+    .badge-soft-received { background: #d1fae5; color: #065f46; }
+    .badge-soft-upcoming { background: #e0f2fe; color: #0369a1; }
+    .badge-soft-overdue { background: #fee2e2; color: #991b1b; }
+
+    .loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,.85); backdrop-filter: blur(8px); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+
+    .pdf-option-card { background: #fff; border: 1px solid var(--card-border); border-radius: 16px; padding: 1rem 1.25rem; }
+    .pdf-check-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: .85rem; font-weight: 600; cursor: pointer; user-select: none; background: #fff; margin: 0 6px 6px 0; }
+    .pdf-check-chip:has(input:checked) { border-color: var(--primary-accent); background: var(--primary-accent-bg); color: var(--primary-accent); }
+    .pdf-preview-wrap { background: #e2e8f0; border-radius: 16px; padding: 16px 8px; overflow-x: auto; }
+    #pdfSheet { width: 360px; margin: 0 auto; background: #fff; color: #1e293b; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; padding: 14px 18px 14px 14px; box-sizing: border-box; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
+    #pdfSheet *, #pdfSheet *::before, #pdfSheet *::after { box-sizing: border-box; }
+    #pdfSheet .p-amt, #pdfSheet .p-row-top > span:last-child, #pdfSheet .p-client > span:last-child, #pdfSheet .p-month > span:last-child, #pdfSheet .p-grand > span:last-child, #pdfSheet .p-row-bot > span:last-child { white-space: nowrap; flex-shrink: 0; text-align: right; }
+    #pdfSheet .p-row-top, #pdfSheet .p-row-bot, #pdfSheet .p-client, #pdfSheet .p-month, #pdfSheet .p-grand { gap: 8px; }
+    #pdfSheet .p-title { font-size: 16px; font-weight: 700; margin: 0; }
+    #pdfSheet .p-sub { font-size: 10.5px; color: #64748b; margin: 2px 0 0; }
+    #pdfSheet .p-head { border-bottom: 2px solid #6366f1; padding-bottom: 8px; margin-bottom: 10px; }
+    #pdfSheet .p-month { background: #eef2ff; color: #3730a3; font-weight: 700; font-size: 12px; padding: 6px 8px; border-radius: 6px; margin: 12px 0 6px; display: flex; justify-content: space-between; }
+    #pdfSheet .p-client { font-weight: 700; font-size: 12px; padding: 5px 2px 4px; border-bottom: 1px solid #cbd5e1; margin-top: 8px; display: flex; justify-content: space-between; gap: 8px; }
+    #pdfSheet .p-client span:first-child { flex: 1; word-break: break-word; }
+    #pdfSheet .p-row { padding: 5px 2px; border-bottom: 1px dashed #e2e8f0; }
+    #pdfSheet .p-row-top { display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+    #pdfSheet .p-row-bot { display: flex; justify-content: space-between; font-size: 10.5px; color: #475569; margin-top: 2px; }
+    #pdfSheet .p-amt { font-weight: 700; color: #0f172a; }
+    #pdfSheet .p-chip { font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 6px; margin-left: 4px; }
+    #pdfSheet .c-pending { background: #fef3c7; color: #92400e; }
+    #pdfSheet .c-upcoming { background: #e0f2fe; color: #0369a1; }
+    #pdfSheet .c-received { background: #d1fae5; color: #065f46; }
+    #pdfSheet .p-overdue { color: #b91c1c; font-weight: 700; }
+    #pdfSheet .p-grand { margin-top: 14px; padding: 8px; background: #1e293b; color: #fff; border-radius: 8px; display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; }
+    #pdfSheet .p-empty { text-align: center; color: #64748b; font-size: 12px; padding: 30px 0; }
+
+    /* ---- Invincible YOU theme, same as the other modules (Source Sans 3, Literata headings, IY purple, light slate) ---- */
+    :root {
+      --primary-accent: #680087; --primary-accent-bg: #f8eefb; --card-border: #e5e7eb; --text-main: #1a1a1a; --text-muted: #484848;
+      --bs-primary: #680087; --bs-primary-rgb: 104, 0, 135; --bs-link-color: #680087; --bs-link-color-rgb: 104, 0, 135; --bs-link-hover-color: #550070;
+      --bs-body-font-family: 'Source Sans 3', Arial, sans-serif; --bs-body-color: #1a1a1a; --bs-border-color: #e5e7eb; --bs-secondary-color: #484848;
+      --bs-primary-bg-subtle: #f8eefb; --bs-primary-text-emphasis: #550070;
+    }
+    body { background: #fafafa; font-family: 'Source Sans 3', Arial, sans-serif; color: #1a1a1a; -webkit-font-smoothing: antialiased; }
+    h1, h2, h3, .h5, .h6, .modal-title { font-family: Literata, Georgia, serif; }
+    .container { max-width: 72rem; padding-left: 1rem; padding-right: 1rem; }
+    .iy-logo { height: 28px; width: auto; }
+    @media (min-width: 640px) { .iy-logo { height: 36px; } }
+    .text-muted { color: #484848 !important; }
+    .text-primary { color: #680087 !important; }
+
+    /* buttons: small, semibold, 8px radius; primary = IY purple, secondary = white with a grey border */
+    .btn { font-size: .75rem; font-weight: 600; padding: .5rem .75rem; border-radius: .5rem; line-height: 1.25; display: inline-flex; align-items: center; justify-content: center; gap: .375rem; }
+    .btn .me-1 { margin-right: 0 !important; }
+    .btn-sm { padding: .375rem .625rem; font-size: .75rem; border-radius: .5rem; }
+    .btn-primary { --bs-btn-bg: #680087; --bs-btn-border-color: #680087; --bs-btn-hover-bg: #550070; --bs-btn-hover-border-color: #550070;
+      --bs-btn-active-bg: #440158; --bs-btn-active-border-color: #440158; --bs-btn-disabled-bg: #680087; --bs-btn-disabled-border-color: #680087; --bs-btn-focus-shadow-rgb: 104, 0, 135; }
+    .btn-light { --bs-btn-bg: #fff; --bs-btn-color: #1a1a1a; --bs-btn-border-color: #e5e7eb; --bs-btn-hover-bg: #f3f4f6; --bs-btn-hover-border-color: #e5e7eb;
+      --bs-btn-hover-color: #1a1a1a; --bs-btn-active-bg: #f3f4f6; --bs-btn-active-border-color: #e5e7eb; }
+    .btn-light.border { border-color: #e5e7eb !important; }
+    .btn:focus-visible { box-shadow: 0 0 0 3px rgba(104, 0, 135, .2); }
+
+    /* inputs: light grey fill, 12px radius, purple focus */
+    .form-control, .form-select, .input-group-text { background-color: #f3f4f6; border-color: #e5e7eb; border-radius: .75rem; font-size: .875rem; color: #1a1a1a; }
+    .input-group-text.bg-white { background-color: #f3f4f6 !important; }
+    .form-control:focus, .form-select:focus { background-color: #f3f4f6; border-color: #7a1a9a; box-shadow: none; }
+    .form-label { font-size: .75rem; font-weight: 500 !important; color: #364153 !important; }
+    input[type="checkbox"] { accent-color: #680087; }
+
+    /* cards and tabs */
+    .filter-card, .metric-card, .pdf-option-card, .accordion-item, .modal-content { border-color: #e5e7eb !important; border-radius: 1rem !important; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .metric-card:hover { transform: none; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+    .nav-pills-modern .nav-link { color: #484848; font-weight: 500; font-size: .875rem; border-radius: .5rem; padding: .5rem .75rem; border: 0; }
+    .nav-pills-modern .nav-link:hover { background: #f3f4f6; color: #1a1a1a; }
+    .nav-pills-modern .nav-link.active { background: #f8eefb; color: #550070; box-shadow: none; border: 0; }
+    .category-toggle-group { background: #f3f4f6; }
+    .category-toggle-item { font-size: .75rem; }
+
+    /* tables like the other modules: small uppercase grey headers, 14px rows */
+    .table { --bs-table-hover-bg: #fafafa; }
+    .table th, .dashboard-table th { font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: #484848; background: transparent; }
+    .table td { font-size: .875rem; border-color: #e5e7eb; }
+    /* Manage Invoices: reimbursement rows green, client/service rows purple */
+    #manageTable tr.inv-reimb { --bs-table-bg: #f0fdf4; --bs-table-hover-bg: #dcfce7; }
+    #manageTable tr.inv-service { --bs-table-bg: #faf5fc; --bs-table-hover-bg: #f3e8f8; }
+    #manageTable tr.inv-reimb > td:first-child { box-shadow: inset 4px 0 0 #16a34a; }
+    #manageTable tr.inv-service > td:first-child { box-shadow: inset 4px 0 0 #680087; }
+    .badge-type-reimb { background: #dcfce7; color: #166534; }
+    .badge-type-service { background: #f3e8f8; color: #550070; }
+    #manageTable .inv-no { font-size: .72rem; color: #484848; font-weight: 600; }
+    #manageTabs .nav-link:not(.active) { color: #484848; }
+    .type-swatch { display: inline-block; width: .7rem; height: .7rem; border-radius: 2px; vertical-align: -1px; }
+    .accordion-button:focus { box-shadow: 0 0 0 3px rgba(104, 0, 135, .15); }
+    .accordion-button:not(.collapsed) { color: #1a1a1a; }
+    .accordion-header { font-family: inherit; }
+    .iy-listbox { position: absolute; z-index: 1060; left: 0; right: 0; margin-top: .25rem; max-height: 15rem; overflow-y: auto; list-style: none; padding: .25rem 0;
+      background: #fff; color: #1a1a1a; border: 1px solid #e5e7eb; border-radius: .75rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1); }
+    .iy-listbox li { padding: .5rem .75rem; font-size: .875rem; cursor: pointer; }
+    .iy-listbox li:hover { background: #f3f4f6; }
+    .iy-listbox li[aria-selected="true"] { background: #f8eefb; color: #550070; }
+    .iy-listbox li.empty { color: #484848; cursor: default; }
+    .form-select { padding-right: 2.25rem; }
+    /* status colours from the shared theme (readable on white) */
+    .text-success { color: #047857 !important; } .text-warning { color: #b45309 !important; } .text-info { color: #0369a1 !important; } .text-danger { color: #cc0000 !important; }
+    .metric-title.text-info, .metric-value.text-info { color: #0369a1 !important; }
+    /* Products & Services, Rate Cards, Engagement Plans: compact rows so more fits on screen */
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .table > :not(caption) > * > * { padding: .2rem .4rem; line-height: 1.25; }
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) :is(.form-control-sm, .form-select-sm) { padding-top: .1rem; padding-bottom: .1rem; min-height: 0; font-size: .78rem; line-height: 1.3; }
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .form-select-sm { padding-right: 1.6rem; background-position: right .4rem center; }
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) .table .btn-sm { padding: .1rem .4rem; font-size: .75rem; line-height: 1.3; }
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) textarea.form-control-sm { height: 1.65rem; min-height: 1.65rem; resize: vertical; overflow: hidden; }
+    :is(#products-sec, #ratecards-sec, #plans-sec, #psModal) textarea.form-control-sm:focus { overflow: auto; }
+    :is(#products-sec, #ratecards-sec, #plans-sec) .table-light > td { padding-top: .25rem; padding-bottom: .25rem; }
+  </style>
+  <style>
+    /* Revenue dashboard: status colours (validated palette slots 1-3), thin bars, recessive grid */
+    :root { --rv-received: #2a78d6; --rv-receivable: #eb6834; --rv-upcoming: #1baf7a; }
+    .rv-received { background: var(--rv-received); } .rv-receivable { background: var(--rv-receivable); } .rv-upcoming { background: var(--rv-upcoming); }
+    .rv-sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+    .rv-bars { display: grid; gap: 6px; }
+    .rv-bar-row { display: grid; grid-template-columns: minmax(7rem, 38%) 1fr; gap: 10px; align-items: center; font-size: .8rem; }
+    .rv-bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1e293b; }
+    .rv-bar-track { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .rv-bar { display: flex; gap: 2px; height: 14px; min-width: 4px; }
+    .rv-seg { height: 100%; cursor: default; }
+    .rv-bar .rv-seg:last-child { border-radius: 0 4px 4px 0; }
+    .rv-bar-value { font-size: .75rem; color: #475569; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .rv-cols-wrap { display: grid; grid-template-columns: auto 1fr; gap: 8px; height: 220px; }
+    .rv-cols-axis { display: flex; flex-direction: column; justify-content: space-between; font-size: .7rem; color: #64748b; padding-bottom: 20px; text-align: right; }
+    .rv-cols { position: relative; display: flex; align-items: flex-end; gap: 6px; padding-bottom: 20px; border-bottom: 1px solid #cbd5e1; }
+    .rv-grid { position: absolute; left: 0; right: 0; border-top: 1px dashed #e5e7eb; margin-bottom: 20px; }
+    .rv-col-slot { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; position: relative; min-width: 0; }
+    .rv-col { width: min(36px, 70%); display: flex; flex-direction: column; gap: 2px; position: relative; z-index: 1; }
+    .rv-cseg { width: 100%; }
+    .rv-col .rv-cseg:first-child { border-radius: 4px 4px 0 0; }
+    .rv-col-label { position: absolute; bottom: -20px; font-size: .7rem; color: #64748b; white-space: nowrap; }
+    #rvTip { position: fixed; z-index: 2200; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 8px 10px; font-size: .78rem; min-width: 12rem; pointer-events: none; color: #1e293b; }
+    .btn-group .btn.active { background: #680087; color: #fff; border-color: #680087; }
+  </style>
+</head>
+<body>
+  <header class="iy-header mb-4">
+    <div class="d-flex align-items-center justify-content-between gap-3 px-3 mx-auto" style="height: 64px; max-width: 72rem;">
+      <div class="d-flex align-items-center gap-3 min-w-0">
+        <img src="/iy-lockup.png" alt="Invincible YOU" class="iy-logo">
+        <h1 class="d-none d-sm-block border-start ps-3">Revenue Planner</h1>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        <nav id="moduleNav" class="hidden flex items-center gap-1 bg-slate-800 rounded-lg p-1"></nav>
+        <span id="currentUser" class="d-none d-sm-inline small text-muted"></span>
+        <button class="iy-icon-btn" onclick="logout()" title="Sign out" aria-label="Sign out"><i class="fa-solid fa-right-from-bracket"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <div class="container pb-5">
+    <div id="loadError" class="alert alert-danger d-none" role="alert"></div>
+    <ul class="nav nav-pills nav-pills-modern mb-3 gap-2" id="rpTabs" role="tablist">
+      <li class="nav-item"><button class="nav-link active" id="revenue-tab" data-bs-toggle="tab" data-bs-target="#revenue-sec" type="button"><i class="fa-solid fa-chart-column me-1"></i> Revenue</button></li>
+      <!-- Admin and Finance Admin edit; Management views -->
+      <li class="nav-item"><button class="nav-link" id="products-tab" data-bs-toggle="tab" data-bs-target="#products-sec" type="button"><i class="fa-solid fa-boxes-stacked me-1"></i> Products &amp; Services</button></li>
+      <li class="nav-item"><button class="nav-link" id="ratecards-tab" data-bs-toggle="tab" data-bs-target="#ratecards-sec" type="button"><i class="fa-solid fa-tags me-1"></i> Rate Cards</button></li>
+      <li class="nav-item"><button class="nav-link" id="plans-tab" data-bs-toggle="tab" data-bs-target="#plans-sec" type="button"><i class="fa-solid fa-handshake me-1"></i> Engagement Plans</button></li>
+    </ul>
+
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="revenue-sec" role="tabpanel">
+        <div class="filter-card p-3 mb-3 d-flex flex-wrap gap-2 align-items-end">
+          <div><label class="form-label small fw-semibold mb-1" for="rvFrom">Invoice date from</label><input type="date" id="rvFrom" class="form-control form-control-sm" onchange="rvClearPreset(); rvRender()"></div>
+          <div><label class="form-label small fw-semibold mb-1" for="rvTo">to</label><input type="date" id="rvTo" class="form-control form-control-sm" onchange="rvClearPreset(); rvRender()"></div>
+          <div class="btn-group btn-group-sm" role="group" aria-label="Period">
+            <button type="button" class="btn btn-light border" data-rv-preset="fy" onclick="rvPreset('fy')">This FY</button>
+            <button type="button" class="btn btn-light border" data-rv-preset="lastfy" onclick="rvPreset('lastfy')">Last FY</button>
+            <button type="button" class="btn btn-light border" data-rv-preset="all" onclick="rvPreset('all')">All time</button>
+          </div>
+          <div><label class="form-label small fw-semibold mb-1" for="rvClient">Client</label><select id="rvClient" class="form-select form-select-sm" style="min-width:14rem" onchange="rvRender()"></select></div>
+          <button class="btn btn-light border btn-sm ms-auto" onclick="rvLoad()" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+        </div>
+        <div id="rvBody"><div class="text-muted text-center py-5">Loading…</div></div>
+      </div>
+      <div class="tab-pane fade" id="products-sec" role="tabpanel">
+        <div class="filter-card p-3">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">The master list of what we sell. Each product or service has list items, each tagged with a pricing model, whether it is mandatory, and the items it needs first.</p>
+            <div class="d-flex gap-2 align-items-center">
+              <div class="input-group input-group-sm" style="width:16rem">
+                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input type="search" id="psSearch" class="form-control border-start-0 ps-0" placeholder="Search products, items…" aria-label="Search products and services" oninput="engRenderProducts()">
+              </div>
+              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenProduct()"><i class="fa-solid fa-plus me-1"></i>Add product / service</button>
+            </div>
+          </div>
+          <div id="psList"></div>
+        </div>
+      </div>
+
+      <div class="tab-pane fade" id="ratecards-sec" role="tabpanel">
+        <div class="filter-card p-3" id="rcListBox">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">Rate cards are price lists built from the master: add products row by row, set the charge per unit for each list item, and change an item's tags for this card if needed.</p>
+            <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenCard()"><i class="fa-solid fa-plus me-1"></i>New rate card</button>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="rcTable"></table></div>
+        </div>
+        <div class="filter-card p-3 d-none" id="rcEditor"></div>
+      </div>
+
+      <div class="tab-pane fade" id="plans-sec" role="tabpanel">
+        <div class="filter-card p-3" id="cpListBox">
+          <div class="d-flex flex-wrap gap-2 align-items-center justify-content-between mb-3">
+            <p class="small text-muted mb-0">A client's cost structure: copy a rate card to the client, set the units (head count, batches, hours, days, months), adjust the items, and record the signed-up amounts. Freeze it once agreed. Drag a plan by its <i class="fa-solid fa-grip-vertical"></i> handle to reorder the list.</p>
+            <div class="d-flex gap-2 align-items-center">
+              <div class="input-group input-group-sm" style="width:16rem">
+                <span class="input-group-text bg-white border-end-0 text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+                <input type="search" id="cpSearch" class="form-control border-start-0 ps-0" placeholder="Search client, plan…" aria-label="Search engagement plans" oninput="engRenderPlans()">
+              </div>
+              <button class="btn btn-primary btn-sm fw-semibold eng-edit d-none" onclick="engOpenApply()"><i class="fa-solid fa-copy me-1"></i>Apply rate card to client</button>
+            </div>
+          </div>
+          <div class="table-responsive"><table class="table table-hover align-middle mb-0 small" id="cpTable"></table></div>
+        </div>
+        <div class="filter-card p-3 d-none" id="cpEditor"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Products & Services / Rate Cards / Engagement Plans dialogs -->
+  <div class="modal fade" id="psModal" tabindex="-1" aria-labelledby="psTitle" aria-hidden="true">
+    <div class="modal-dialog modal-xl"><form class="modal-content" onsubmit="engSaveProduct(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="psTitle">Product / service</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <div class="row g-3 mb-3">
+          <div class="col-md-5"><label class="form-label small fw-semibold" for="psName">Name</label><input id="psName" class="form-control" maxlength="150" required></div>
+          <div class="col-md-7"><label class="form-label small fw-semibold" for="psDesc">Description</label><input id="psDesc" class="form-control" maxlength="1000"></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h3 class="h6 fw-bold mb-0">List items</h3>
+          <button type="button" class="btn btn-light border btn-sm" onclick="engAddPsItem()"><i class="fa-solid fa-plus me-1"></i>Add list item</button>
+        </div>
+        <div class="table-responsive"><table class="table align-middle small mb-0" id="psItems"></table></div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button type="button" class="btn btn-outline-danger" id="psDelete" onclick="engDeleteProduct()"><i class="fa-solid fa-trash me-1"></i>Delete</button>
+        <div><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button> <button class="btn btn-primary fw-semibold">Save</button></div>
+      </div>
+    </form></div>
+  </div>
+  <div class="modal fade" id="applyModal" tabindex="-1" aria-labelledby="applyTitle" aria-hidden="true">
+    <div class="modal-dialog"><form class="modal-content" onsubmit="engApply(event)">
+      <div class="modal-header"><h2 class="modal-title h5" id="applyTitle">Apply a rate card to a client</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <label class="form-label small fw-semibold" for="apClient">Client</label><select id="apClient" class="form-select mb-3" required></select>
+        <label class="form-label small fw-semibold" for="apCard">Rate card</label><select id="apCard" class="form-select mb-3" required></select>
+        <label class="form-label small fw-semibold" for="apName">Plan name</label><input id="apName" class="form-control" maxlength="150" placeholder="e.g. FY27 Leadership Program (defaults to the rate card's name)">
+        <div class="form-text">The rate card is copied: later changes to it don't change this client's plan.</div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Copy to client</button></div>
+    </form></div>
+  </div>
+
+  <div id="rvTip" class="d-none" role="tooltip"></div>
+  <div id="iyToast" class="position-fixed bottom-0 end-0 m-3 alert d-none shadow" style="z-index:2000;max-width:28rem" role="status"></div>
+  <div id="iyBusy" class="position-fixed top-0 start-50 translate-middle-x mt-3 px-3 py-2 rounded-pill shadow bg-dark text-white small d-none d-flex align-items-center gap-2" style="z-index:2100" role="status" aria-live="polite">
+    <span class="spinner-border spinner-border-sm flex-shrink-0" aria-hidden="true"></span><span class="iy-busy-text">Saving…</span></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // Shared helpers (the Receivables page has the same ones in invoice-automator.js).
+    const $id = (id) => document.getElementById(id);
+    const modal = (id) => bootstrap.Modal.getOrCreateInstance($id(id));
+    const formatINR = (val) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(val);
+    const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    // Result message: success stays 6 s, errors 15 s; either can be closed.
+    function toast(msg, ok = true) {
+      const el = $id('iyToast');
+      el.className = `position-fixed bottom-0 end-0 m-3 alert shadow d-flex gap-2 align-items-start ${ok ? 'alert-success' : 'alert-danger'}`;
+      el.innerHTML = `<i class="fa-solid fa-${ok ? 'circle-check' : 'triangle-exclamation'} mt-1"></i><span style="flex:1"></span><button type="button" class="btn-close btn-sm" aria-label="Close" onclick="this.parentElement.classList.add('d-none')"></button>`;
+      el.querySelector('span').textContent = msg;
+      clearTimeout(toast.t);
+      toast.t = setTimeout(() => el.classList.add('d-none'), ok ? 6000 : 15000);
+    }
+    // "Please wait" notice while the server works; returns the function that ends it.
+    function busy(msg = 'Saving…') {
+      const el = $id('iyBusy');
+      busy.n = (busy.n || 0) + 1;
+      el.querySelector('.iy-busy-text').textContent = msg;
+      el.classList.remove('d-none');
+      document.body.style.cursor = 'progress';
+      let done = false;
+      return () => { if (done) return; done = true; busy.n -= 1; if (!busy.n) { el.classList.add('d-none'); document.body.style.cursor = ''; } };
+    }
+    const rvClearPreset = () => document.querySelectorAll('[data-rv-preset]').forEach((b) => b.classList.remove('active'));
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+      location.href = '/payouts.html';
+    }
+    // Signed-in check + module switcher. Admin, Management and Finance Admin.
+    async function start() {
+      const res = await fetch('/api/payouts');
+      if (res.status === 401) { location.href = '/payouts.html?next=revenue'; return; }
+      const state = await res.json().catch(() => null);
+      const fail = (msg) => { $id('loadError').textContent = msg; $id('loadError').classList.remove('d-none'); document.querySelector('.tab-content').classList.add('d-none'); $id('rpTabs').classList.add('d-none'); };
+      if (!state || !state.me) return fail('Something went wrong, please try again.');
+      $id('currentUser').innerText = state.me.email;
+      renderModules($id('moduleNav'), { role: state.me.role, ptLinked: state.me.ptLinked, extraRoles: state.me.extraRoles, current: 'revenue' });
+      if (!['admin', 'management'].includes(state.me.role) && !state.me.extraRoles.includes('finance_admin')) return fail('Revenue Planner is only for Admin, Management and Finance Admin.');
+      startEngagements();
+      $id('revenue-tab').addEventListener('shown.bs.tab', () => rvLoad());
+      rvLoad();
+    }
+    window.onload = start;
+  </script>
+  <script src="/engagements.js"></script>
+  <script src="/revenue.js"></script>
+</body>
+</html>

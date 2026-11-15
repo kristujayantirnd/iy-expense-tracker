@@ -247,6 +247,10 @@ function openRow(key) {
   $id('rowInfo').innerText = `${editingRow.client} · invoice date ${editingRow.invoiceDate} · ${formatINR(editingRow.amount)}`;
   $id('rwDraftNote').classList.toggle('d-none', !d);
   if (d) $id('rwDraftBy').innerText = `${d.by} on ${d.on}`;
+  // database mode: the invoice date can change while the invoice is a new entry
+  const dateEditable = inv.dbMode && editingRow.status.toUpperCase() === 'NEW_ENTRY';
+  $id('rwDateBox').classList.toggle('d-none', !dateEditable);
+  $id('rwDate').value = editingRow.invoiceDateIso || '';
   $id('rwNumber').value = d ? d.invoiceNumber : editingRow.invoiceNumber;
   $id('rwPdf').value = d ? d.pdfUrl : editingRow.pdfUrl;
   $id('rwGst').value = (d ? d.withGst : editingRow.withGst) || '';
@@ -325,7 +329,8 @@ async function saveRow(e) {
 }
 
 const rowForm = () => ({ row: editingRow.row, id: editingRow.id, client: editingRow.client, invoiceDateIso: editingRow.invoiceDateIso || '', invoiceNumber: $id('rwNumber').value,
-  pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value });
+  pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value,
+  ...(!$id('rwDateBox').classList.contains('d-none') && $id('rwDate').value ? { invoiceDate: $id('rwDate').value } : {}) });
 
 // Keeps what is filled in so far in the app only; the sheet row is untouched until Save to sheet.
 async function saveRowDraft(btn) {

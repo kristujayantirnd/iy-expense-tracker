@@ -414,7 +414,7 @@ function engOpenPlan(id) {
   const p = E.data.plans.find((x) => x.id === id);
   if (!p) return;
   E.plan = { id: p.id, name: p.name, notes: p.notes, client: p.client, rateCardId: p.rateCardId, frozenTotal: p.frozenTotal, frozenOn: p.frozenOn, frozenBy: p.frozenBy,
-    items: p.items.map((i) => ({ ...i, prerequisites: [...i.prerequisites] })), dirty: false };
+    items: p.items.map((i) => ({ ...i, prerequisites: [...i.prerequisites] })), schedule: (p.schedule || []).map((x) => ({ ...x })), dirty: false };
   $id('cpListBox').classList.add('d-none');
   $id('cpEditor').classList.remove('d-none');
   engRenderPlan();
@@ -676,11 +676,98 @@ function engRenderPlan() {
         }).join(''));
       }).join('') || '<tr><td colspan="9" class="text-muted text-center py-4">No items. Add a product / service above.</td></tr>'}</tbody>
       <tfoot><tr class="fw-bold border-top"><td colspan="4" class="text-end">Total</td><td class="text-end" id="cp-total-actual"></td><td class="text-end" id="cp-total-signed"></td><td class="text-end" id="cp-total-var"></td><td colspan="2"></td></tr></tfoot>
-    </table></div>`;
+    </table></div>
+    <div class="border rounded-3 p-3 mt-3" id="cpSchedule"></div>`;
   engPlanFigures();
+  engRenderSchedule();
 }
 
-const engPlanBody = () => ({ id: E.plan.id, name: E.plan.name, notes: E.plan.notes,
+/* ---------- invoice schedule: the signed-up total split into dated invoices ---------- */
+
+// What the invoices must add up to: the frozen total, else the current signed-up total.
+const engScheduleTarget = () => (E.plan.frozenTotal != null ? E.plan.frozenTotal : engTotals(E.plan.items).signed);
+const engIsoAddMonths = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const t = new Date(Date.UTC(y, m - 1 + n, 1)); const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate(); t.setUTCDate(Math.min(d, last)); return t.toISOString().slice(0, 10); };
+const engTodayIso = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
+
+// Splits what is left (target minus generated invoices) equally over the rows not generated yet; dates a month apart.
+function engSplit() {
+  const n = Math.round(Number($id('cpInvCount').value));
+  const done = E.plan.schedule.filter((x) => x.invoiceId);
+  if (!(n >= 1 && n <= 60)) return toast('Enter the number of invoices (1 to 60)', false);
+  if (n < done.length) return toast(`${done.length} invoice(s) are already generated, so the number can't be lower than that`, false);
+  const left = engR2(engScheduleTarget() - done.reduce((s, x) => s + x.amount, 0));
+  const k = n - done.length;
+  const old = E.plan.schedule.filter((x) => !x.invoiceId);
+  const lastDone = done.map((x) => x.invoiceDate).sort().pop();
+  let date = old[0]?.invoiceDate || (lastDone ? engIsoAddMonths(lastDone, 1) : engTodayIso());
+  const each = k ? Math.floor((left / k) * 100) / 100 : 0;
+  const rows = Array.from({ length: k }, (_, i) => {
+    const row = { amount: i === k - 1 ? engR2(left - each * (k - 1)) : each, invoiceDate: old[i]?.invoiceDate || date };
+    date = engIsoAddMonths(row.invoiceDate, 1);
+    return row;
+  });
+  E.plan.schedule = [...done, ...rows];
+  E.plan.dirty = true;
+  engRenderSchedule();
+}
+
+function engSchedSet(i, field, value) {
+  const row = E.plan.schedule[i];
+  row[field] = field === 'amount' ? Number(value) || 0 : value;
+  E.plan.dirty = true;
+  engScheduleTotals();
+}
+
+function engScheduleTotals() {
+  const sum = engR2(E.plan.schedule.reduce((s, x) => s + (Number(x.amount) || 0), 0));
+  const target = engR2(engScheduleTarget());
+  const diff = engR2(target - sum);
+  const el = $id('cpSchedTotal');
+  if (el) el.innerHTML = `${engMoney(sum)} ${!E.plan.schedule.length ? '' : diff === 0 ? '<span class="text-success small ms-1"><i class="fa-solid fa-circle-check"></i> matches</span>'
+    : `<span class="text-danger small ms-1">${engMoney(Math.abs(diff))} ${diff > 0 ? 'short of' : 'over'} ${engMoney(target)}</span>`}`;
+  const btn = $id('cpGenerate');
+  if (btn) btn.disabled = !(E.plan.frozenTotal != null && diff === 0 && E.plan.schedule.some((x) => !x.invoiceId));
+}
+
+const ENG_INV_STATUS = { NEW_ENTRY: 'New entry', APPROVED: 'Approved', REMINDER: 'Emailed', 'PAYMENT RECEIVED': 'Paid' };
+function engRenderSchedule() {
+  const P = E.plan;
+  const ro = !engCanEdit();
+  const frozen = P.frozenTotal != null;
+  const rows = P.schedule;
+  const done = rows.filter((x) => x.invoiceId).length;
+  $id('cpSchedule').innerHTML = `
+    <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap mb-2">
+      <div><h3 class="h6 fw-bold mb-1"><i class="fa-solid fa-file-invoice me-1"></i>Invoices to the client</h3>
+        <div class="small text-muted">The signed-up total is split into this many invoices. <b>Generate invoices</b> creates a Finance Team request and a new entry in Receivables → Manage Invoices for each; their dates can be changed there until approved. Each invoice is accounted to the items above in proportion to their signed-up amounts.</div></div>
+      ${ro ? '' : `<div class="d-flex gap-2 align-items-end">
+        <div><label class="form-label small fw-semibold mb-1" for="cpInvCount">Number of invoices</label>
+          <input type="number" id="cpInvCount" min="1" max="60" class="form-control form-control-sm" style="width:6rem" value="${rows.length || ''}" placeholder="e.g. 4"></div>
+        <button class="btn btn-light border btn-sm" onclick="engSplit()"><i class="fa-solid fa-divide me-1"></i>Split</button></div>`}
+    </div>
+    ${rows.length ? `<div class="table-responsive"><table class="table align-middle small mb-2">
+      <thead class="bg-light"><tr><th style="width:3rem">#</th><th style="width:11rem">Invoice date</th><th style="width:12rem" class="text-end">Amount (₹, excl. GST)</th><th>Status</th></tr></thead>
+      <tbody>${rows.map((x, i) => `<tr>
+        <td>${i + 1}</td>
+        <td><input type="date" class="form-control form-control-sm" value="${esc(x.invoiceDate || '')}" ${ro || x.invoiceId ? 'disabled' : ''} aria-label="Invoice ${i + 1} date" onchange="engSchedSet(${i}, 'invoiceDate', this.value)"></td>
+        <td><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end" value="${x.amount || ''}" ${ro || x.invoiceId ? 'disabled' : ''} aria-label="Invoice ${i + 1} amount" oninput="engSchedSet(${i}, 'amount', this.value)"></td>
+        <td>${x.invoiceId ? `<span class="badge badge-soft badge-soft-received">${esc(ENG_INV_STATUS[String(x.status || '').toUpperCase()] || x.status || 'Generated')}</span>${x.invoiceNumber ? ` <span class="text-muted">${esc(x.invoiceNumber)}</span>` : ''}`
+          : '<span class="text-muted">Not generated</span>'}</td></tr>`).join('')}</tbody>
+      <tfoot><tr class="fw-bold"><td colspan="2" class="text-end">Total</td><td class="text-end" id="cpSchedTotal" colspan="2"></td></tr></tfoot></table></div>` : '<div class="small text-muted">No invoices planned yet.' + (ro ? '' : ' Enter the number of invoices and click Split.') + '</div>'}
+    ${ro ? '' : `<div class="d-flex gap-2 align-items-center flex-wrap">
+      <button class="btn btn-primary btn-sm fw-semibold" id="cpGenerate" onclick="engGenerate()"><i class="fa-solid fa-paper-plane me-1"></i>Generate invoices</button>
+      <span class="small text-muted">${!frozen ? '<i class="fa-solid fa-lock me-1"></i>Freeze the plan first, so the total is fixed.' : done ? `${done} of ${rows.length} generated.` : 'Generates every row that isn\'t generated yet.'}</span></div>`}`;
+  engScheduleTotals();
+}
+
+async function engGenerate() {
+  const todo = E.plan.schedule.filter((x) => !x.invoiceId);
+  if (!confirm(`Create ${todo.length} invoice request${todo.length > 1 ? 's' : ''} for ${E.plan.client}?\n\n${todo.map((x) => `• ${x.invoiceDate.split('-').reverse().join('/')}: ${engMoney(x.amount)}`).join('\n')}\n\nEach becomes a Finance Team request and a new entry in Manage Invoices.`)) return;
+  if (E.plan.dirty && !(await engPost({ action: 'plan', plan: engPlanBody() }, 'Saved'))) return;
+  if (await engPost({ action: 'generateInvoices', id: E.plan.id }, 'Generated')) engOpenPlan(E.plan.id);
+}
+
+const engPlanBody = () => ({ id: E.plan.id, name: E.plan.name, notes: E.plan.notes, schedule: E.plan.schedule.filter((x) => !x.invoiceId).map((x) => ({ amount: x.amount, invoiceDate: x.invoiceDate })),
   items: engPlanGroups(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, pricingModel: r.pricingModel, mandatory: r.mandatory, prerequisites: r.prerequisites, unitPrice: r.unitPrice, units: r.units,
     months: r.pricingModel === 'per_head_month' ? r.months ?? 1 : null, signedUp: r.signedUp, notes: r.notes })) });
 
