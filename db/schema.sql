@@ -246,3 +246,48 @@ alter table client_plan_items add column if not exists months numeric;
 alter table client_plan_items add column if not exists notes text not null default '';
 -- Engagement plans are listed in the order they are dragged to.
 alter table client_plans add column if not exists sort int not null default 0;
+
+-- Receivables in the database (were the sheet's RequestInvoice and Invoice Extracts tabs). The sheet keeps those two
+-- tabs only as the mailing queue for its Apps Script; each sheet row carries the record's id in an AppId column.
+-- settings.receivablesSource = 'db' once the sheet has been imported (until then the app reads the sheet).
+create table if not exists invoice_requests (
+  id serial primary key,
+  invoice_type text not null,
+  client text not null,
+  category text not null default '',
+  invoice_date date,
+  description text not null default '',
+  po_number text not null default 'N/A',
+  amount numeric not null default 0,
+  email_status text not null default 'TO SEND',
+  attachments text not null default '',
+  extra jsonb not null default '{}',
+  sheet_error text not null default '',
+  created_at timestamptz not null default now()
+);
+create table if not exists receivable_invoices (
+  id serial primary key,
+  client text not null,
+  invoice_number text not null default '',
+  invoice_date date,
+  category text not null default '',
+  amount numeric not null default 0,
+  with_gst numeric,
+  to_receive numeric,
+  due_date date,
+  pdf_url text not null default '',
+  status text not null default 'NEW_ENTRY',
+  email_thread text not null default '',
+  invoice_type text not null default '',
+  received_date date,
+  bills text not null default '',
+  pdf_without_bills text not null default '',
+  pdf_with_bills text not null default '',
+  extra jsonb not null default '{}',
+  draft jsonb,
+  request_id int references invoice_requests(id) on delete set null,
+  sheet_error text not null default '',
+  updated_by int references users(id) on delete set null,
+  updated_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);

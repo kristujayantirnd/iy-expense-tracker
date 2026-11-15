@@ -1,10 +1,16 @@
-// Client Invoice Automator. Clients and settings live here; the invoice rows stay in the sheet
-// (RequestInvoice, Invoice Extracts) and emails go out from Gmail, both through the sheet's
-// Apps Script (InvoiceAutomator.gs). Only Admin and Finance Admin use it.
+// Client Invoice Automator. Clients and settings live here. Emails go out from Gmail through the sheet's Apps Script.
+// Two modes (settings.receivablesSource):
+//   sheet (until the import): the invoice rows live in the sheet (RequestInvoice, Invoice Extracts; InvoiceAutomatorSheet.gs)
+//   db (after "Move to database"): the rows live in receivable_invoices / invoice_requests; the sheet keeps those two
+//      tabs as the mailing queue (InvoiceAutomator.gs), each row carrying the record id in AppId. Every change is
+//      saved here first, then written to the sheet; a failed sheet write is kept on the record for "Retry sheet sync".
+// Only Admin and Finance Admin use it.
 // GET ?key=…            -> the Apps Script: { config, clients }
 // GET                   -> { config, clients, script, key (admin) }
 // GET ?rows=1           -> { rows } from Invoice Extracts
 // POST {action, …}      -> config | client | import | draft | deleteDraft | request | rowDraft | deleteRowDraft | update | delete | send | script (admin)
+//                          db mode also: importSheet (admin, the one-time move) | resync | syncMail
+// POST {key, action: 'mailed', kind, id, thread?} -> the Apps Script timers reporting an email they sent (db mode)
 // Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
@@ -101,6 +107,8 @@ async function script(db, payload) {
 }
 
 async function act(db, me, body) {
+  if (body?.action === 'importSheet') return importSheet(db, me);
+  if (DB_ACTIONS[body?.action] && (await isDb(db))) return DB_ACTIONS[body.action](db, me, body);
   switch (body?.action) {
     case 'config':
       await setSetting(db, 'invoiceConfig', JSON.stringify(cleanConfig(body.config)));
@@ -234,6 +242,295 @@ async function act(db, me, body) {
   throw new Bad('Unknown action');
 }
 
+
+/* ================= Receivables in the database (db mode) ================= */
+
+const isDb = async (db) => (await getSetting(db, 'receivablesSource')) === 'db';
+const DUE_DAYS = 45; // Due Date = Invoice Date + 45 days
+const r2 = (n) => Math.round(n * 100) / 100;
+export const isReimbType = (t) => /reimburs/i.test(t || '');
+// Amount to be received: amount with GST - 10% TDS on the amount without GST; reimbursements carry no TDS.
+export const toBeReceived = (withGst, amount, reimb) => r2(reimb ? withGst : withGst - 0.1 * amount);
+const fileId = (url) => (String(url || '').match(/[-\w]{25,}/) || [])[0] || null;
+const dmy = (iso) => (iso ? iso.split('-').reverse().join('/') : '');
+const typeSentence = (invoiceType) => (invoiceType === 'Service' ? 'for the service rendered.' : 'for reimbursement of the expenses incurred.');
+
+export async function invoiceRecords(db, id = null) {
+  return db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as "invoiceDateIso", category,
+                   amount::float8 as amount, with_gst::float8 as "withGst", to_receive::float8 as "toReceive", to_char(due_date, 'YYYY-MM-DD') as "dueDateIso",
+                   pdf_url as "pdfUrl", status, email_thread as thread, invoice_type as "invoiceType", to_char(received_date, 'YYYY-MM-DD') as "receivedDateIso",
+                   bills, pdf_without_bills as "noBills", pdf_with_bills as "withBills", draft, request_id as "requestId", sheet_error as "sheetError"
+            from receivable_invoices where (${id}::int is null or id = ${id}) order by invoice_date nulls last, id`;
+}
+
+// A record in the shape the Manage Invoices screen uses (same fields the sheet rows had, with id for row).
+const billLinks = (r) => (isReimbType(r.invoiceType) ? String(r.bills || '').split(/\s+/).filter(Boolean) : []);
+const screenRow = (r) => ({
+  id: r.id, client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: dmy(r.invoiceDateIso), invoiceDateIso: r.invoiceDateIso || '', category: r.category,
+  amount: r.amount || 0, withGst: r.withGst || 0, toReceive: r.toReceive || 0, dueDate: dmy(r.dueDateIso), dueDateIso: r.dueDateIso || '', pdfUrl: r.pdfUrl, status: r.status,
+  emailed: Boolean(r.thread), invoiceType: r.invoiceType, receivedDate: dmy(r.receivedDateIso), receivedDateIso: r.receivedDateIso || '',
+  billCount: billLinks(r).length, billsAttached: Boolean(fileId(r.withBills)) && fileId(r.withBills) === fileId(r.pdfUrl), draft: r.draft || null, sheetError: r.sheetError,
+});
+
+// What the sheet row holds (the Apps Script writes these by AppId).
+const extractRow = (r) => ({ id: r.id, client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: r.invoiceDateIso || '', category: r.category, amount: r.amount,
+  withGst: r.withGst, toReceive: r.toReceive, dueDate: r.dueDateIso || '', pdfUrl: r.pdfUrl, status: r.status, thread: r.thread, invoiceType: r.invoiceType,
+  receivedDate: r.receivedDateIso || '', bills: r.bills, noBills: r.noBills, withBills: r.withBills });
+async function requestRow(db, id) {
+  const [q] = await db`select id, invoice_type as "invoiceType", client, category, to_char(invoice_date, 'YYYY-MM-DD') as "invoiceDate", description,
+                              po_number as "poNumber", amount::float8 as amount, email_status as "emailStatus", attachments from invoice_requests where id = ${id}`;
+  return q;
+}
+
+// Writes a record's sheet row; a failure is kept on the record (for Retry sheet sync) and returned, never thrown.
+async function pushExtract(db, id) {
+  const [r] = await invoiceRecords(db, id);
+  if (!r) return '';
+  try {
+    await script(db, { action: 'putExtract', row: extractRow(r) });
+    await db`update receivable_invoices set sheet_error = '' where id = ${id}`;
+    return '';
+  } catch (e) {
+    const msg = String(e.message || e).slice(0, 300);
+    await db`update receivable_invoices set sheet_error = ${msg} where id = ${id}`;
+    return msg;
+  }
+}
+async function pushRequest(db, id, sendNow = false) {
+  const row = await requestRow(db, id);
+  if (!row) return { error: '' };
+  try {
+    const out = await script(db, { action: 'putRequest', row, sendNow });
+    await db`update invoice_requests set sheet_error = '', email_status = case when ${out.sent === true} then 'SENT' else email_status end where id = ${id}`;
+    return out;
+  } catch (e) {
+    const msg = String(e.message || e).slice(0, 300);
+    await db`update invoice_requests set sheet_error = ${msg} where id = ${id}`;
+    return { error: msg };
+  }
+}
+
+async function oneRecord(db, id) {
+  const [r] = await invoiceRecords(db, idOf(id));
+  if (!r) throw new Bad('That invoice no longer exists. Refresh the page.');
+  return r;
+}
+
+const DB_ACTIONS = {
+  async request(db, me, body) {
+    const r = body.request || {};
+    const { invoiceType, client } = await requestBasics(db, r);
+    let description, amount, attachments;
+    if (Array.isArray(r.items)) {
+      const items = cleanItems(r.items);
+      description = items.map((it) => `${it.particulars} - ${rupees(it.amount)}`).join('\n');
+      amount = r2(items.reduce((s, it) => s + it.amount, 0));
+      attachments = items.map((it) => it.link).filter(Boolean);
+    } else {
+      description = text(r.description, 1000, true);
+      amount = r2(Number(r.amount));
+      if (!Number.isFinite(amount) || amount <= 0 || amount > 1e10) throw new Bad('Amount must be a number above 0');
+      attachments = [driveLink(r.attachmentUrl, 'The attachment must be a Google Drive file link')].filter(Boolean);
+    }
+    const invoiceDate = date(r.invoiceDate);
+    const [q] = await db`insert into invoice_requests (invoice_type, client, invoice_date, description, po_number, amount, attachments)
+                         values (${invoiceType}, ${client}, ${invoiceDate}, ${description}, ${text(r.poNumber, 300) || 'N/A'}, ${amount}, ${attachments.join('\n')}) returning id`;
+    const [x] = await db`insert into receivable_invoices (client, invoice_date, amount, due_date, invoice_type, status, bills, request_id, updated_by)
+                         values (${client}, ${invoiceDate}, ${amount}, ${invoiceDate}::date + ${DUE_DAYS}::int, ${typeSentence(invoiceType)}, 'NEW_ENTRY',
+                                 ${isReimbType(invoiceType) ? attachments.join('\n') : ''}, ${q.id}, ${me.id}) returning id`;
+    if (r.draftId) await db`delete from reimb_requests where id = ${idOf(r.draftId)}`; // now a request
+    const out = await pushRequest(db, q.id, r.sendNow === true);
+    const sheetErr = (await pushExtract(db, x.id)) || out.error;
+    if (sheetErr) return { notice: `Invoice requested and saved, but the sheet copy failed: ${sheetErr} Use Retry sheet sync in Manage Invoices; the Finance Team email goes out once it is in the sheet.` };
+    if (out.sendError) return { notice: `Invoice requested, but the Finance Team email failed: ${out.sendError} It is retried every hour; don't request it again.` };
+    return { notice: out.sent ? 'Invoice requested and emailed to the Finance Team' : 'Invoice requested. The Finance Team email goes out at the scheduled time.' };
+  },
+
+  async rowDraft(db, me, body) {
+    const u = body.update || {};
+    const withGst = u.withGst === '' || u.withGst == null ? null : r2(Number(u.withGst));
+    if (withGst !== null && (!Number.isFinite(withGst) || withGst <= 0 || withGst > 1e10)) throw new Bad('Amount with GST must be a number above 0');
+    const draft = {
+      invoiceNumber: text(u.invoiceNumber, 50), pdfUrl: text(u.pdfUrl, 500), withGst, status: STATUSES.includes(String(u.status)) ? String(u.status) : 'NEW_ENTRY',
+      receivedDate: DATE.test(String(u.receivedDate || '')) ? u.receivedDate : '',
+      by: me.name || me.email, on: new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }),
+    };
+    const done = await db`update receivable_invoices set draft = ${JSON.stringify(draft)} where id = ${idOf(u.id)} returning id`;
+    if (!done.length) throw new Bad('That invoice no longer exists. Refresh the page.');
+    return { notice: 'Saved as draft. The invoice is unchanged until you save it.' };
+  },
+
+  async deleteRowDraft(db, me, body) {
+    await db`update receivable_invoices set draft = null where id = ${idOf(body.update?.id)}`;
+    return { notice: 'Draft discarded' };
+  },
+
+  async update(db, me, body) {
+    const u = body.update || {};
+    const r = await oneRecord(db, u.id);
+    const status = String(u.status || '');
+    if (!STATUSES.includes(status)) throw new Bad('Unknown status');
+    const pdfUrl = driveLink(u.pdfUrl, 'Paste the Google Drive link of the invoice PDF');
+    const invoiceNumber = text(u.invoiceNumber, 50);
+    let withGst = u.withGst === '' || u.withGst == null ? null : r2(Number(u.withGst));
+    if (withGst !== null && (!Number.isFinite(withGst) || withGst <= 0 || withGst > 1e10)) throw new Bad('Amount with GST must be a number above 0');
+    withGst = withGst ?? r.withGst; // left as is when not given
+    const missing = readyMissing({ invoiceNumber, pdfUrl, withGst });
+    if (['APPROVED', 'REMINDER'].includes(status) && missing.length) throw new Bad(`Add the ${missing.join(', ')} before choosing this status`);
+    const toReceive = withGst > 0 ? toBeReceived(withGst, r.amount, isReimbType(r.invoiceType)) : r.toReceive;
+    const received = status === 'Payment Received' ? date(u.receivedDate) : null;
+    await db`update receivable_invoices set invoice_number = ${invoiceNumber}, pdf_url = ${pdfUrl}, with_gst = ${withGst}, to_receive = ${toReceive},
+               status = ${status}, received_date = ${received}, draft = null, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+    const sheetErr = await pushExtract(db, r.id);
+    const bills = u.attachBills === true && status === 'APPROVED' ? await attachBillsDb(db, r.id, u.rebuildBills === true) : '';
+    return { notice: 'Invoice saved' + bills + (sheetErr ? `. The sheet copy failed (${sheetErr}); use Retry sheet sync.` : '') };
+  },
+
+  async delete(db, me, body) {
+    const r = await oneRecord(db, body.update?.id);
+    if (r.status.toUpperCase() !== 'NEW_ENTRY') throw new Bad(`Only new entries can be deleted (this one is ${r.status})`);
+    // the sheet first, so a Finance Team email can't go out for a deleted request
+    let request = 'none';
+    if (r.requestId) {
+      const [q] = await db`select email_status from invoice_requests where id = ${r.requestId}`;
+      if (q && q.email_status.toUpperCase() === 'SENT') request = 'sent';
+      else if (q) { await script(db, { action: 'deleteRequest', id: r.requestId }); request = 'removed'; }
+    }
+    await script(db, { action: 'deleteExtract', id: r.id });
+    await db`delete from receivable_invoices where id = ${r.id}`;
+    if (request === 'removed') await db`delete from invoice_requests where id = ${r.requestId}`;
+    return { notice: 'Invoice deleted.' + (request === 'removed' ? ' Its request to the Finance Team had not been emailed yet and is removed too.'
+      : request === 'sent' ? ' The Finance Team was already emailed about it, so let them know it is cancelled.' : '') };
+  },
+
+  async send(db, me, body) {
+    const r = await oneRecord(db, body.id);
+    if (!['NEW_ENTRY', 'APPROVED'].includes(r.status.toUpperCase())) throw new Bad(`This invoice has already been emailed (status ${r.status})`);
+    const missing = readyMissing(r);
+    if (missing.length) throw new Bad(`Add the ${missing.join(', ')} first`);
+    const row = screenRow(r);
+    if (row.billCount && !row.billsAttached) throw new Bad('Approve this reimbursement invoice first so its bills are added to the PDF');
+    const out = await script(db, { action: 'send', row: extractRow(r) });
+    await db`update receivable_invoices set status = 'REMINDER', email_thread = ${String(out.thread || '')}, sheet_error = '', updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+    return { notice: 'Invoice emailed to the client. Reminders now follow the configured intervals.' };
+  },
+
+  // Writes every record whose sheet copy failed.
+  async resync(db) {
+    const ex = await db`select id from receivable_invoices where sheet_error <> ''`;
+    const rq = await db`select id from invoice_requests where sheet_error <> ''`;
+    let failed = 0;
+    for (const { id } of rq) if ((await pushRequest(db, id)).error) failed++;
+    for (const { id } of ex) if (await pushExtract(db, id)) failed++;
+    const done = ex.length + rq.length - failed;
+    return { notice: !ex.length && !rq.length ? 'Nothing waiting: the sheet is up to date.' : `${done} written to the sheet${failed ? `, ${failed} still failing (see the invoice)` : ''}.` };
+  },
+
+  // Catches up with emails the sheet's timers sent but couldn't report.
+  async syncMail(db) {
+    const st = await script(db, { action: 'mailStatus' });
+    let n = 0;
+    for (const x of st.extracts || []) {
+      const id = Number(x.id);
+      if (!Number.isInteger(id)) continue;
+      const done = await db`update receivable_invoices set status = case when ${x.status.toUpperCase() === 'REMINDER'} and upper(status) in ('NEW_ENTRY', 'APPROVED') then 'REMINDER' else status end,
+                                     email_thread = case when ${x.thread} <> '' then ${x.thread} else email_thread end
+                            where id = ${id} and ((${x.status.toUpperCase() === 'REMINDER'} and upper(status) in ('NEW_ENTRY', 'APPROVED')) or (${x.thread} <> '' and email_thread <> ${x.thread})) returning id`;
+      n += done.length;
+    }
+    for (const q of st.requests || []) {
+      const id = Number(q.id);
+      if (!Number.isInteger(id) || q.emailStatus.toUpperCase() !== 'SENT') continue;
+      n += (await db`update invoice_requests set email_status = 'SENT' where id = ${id} and upper(email_status) <> 'SENT' returning id`).length;
+    }
+    return { notice: n ? `${n} email update(s) brought in from the sheet.` : 'Emails are up to date.' };
+  },
+};
+
+// Approving a reimbursement invoice: the bills go into the PDF from page 2 (merged here, saved in Drive by the script).
+async function attachBillsDb(db, id, rebuild) {
+  try {
+    const [r] = await invoiceRecords(db, id);
+    const row = extractRow(r);
+    const got = await script(db, { action: 'bills', row, force: rebuild });
+    if (got.already) return '. The bills are already in the invoice PDF.';
+    if (!got.bills?.length) return '. No bills were found for this reimbursement request, so the PDF is unchanged.';
+    const { pdf, added, skipped } = await mergeBills(got.invoice, got.bills);
+    if (pdf.length > MAX_EMAIL_PDF) return `, but the PDF with the bills would be ${Math.ceil(pdf.length / 1048576)} MB, over Gmail's 25 MB limit, so it is unchanged.`;
+    const merged = fileId(r.withBills) && fileId(r.withBills) === fileId(r.pdfUrl) ? fileId(r.withBills) : null;
+    const saved = await script(db, { action: 'saveMerged', baseId: got.baseId, previousMerged: merged, data: pdf.toString('base64') });
+    await db`update receivable_invoices set pdf_url = ${saved.url}, pdf_with_bills = ${saved.url}, pdf_without_bills = ${saved.baseUrl} where id = ${id}`;
+    await pushExtract(db, id);
+    return `. ${added} bill(s) added to the invoice PDF from page 2${skipped ? `; ${skipped} could not be read (a note page stands in for each)` : ''}.`;
+  } catch (e) {
+    if (!(e instanceof Bad)) console.error(e);
+    return `, but the bills could not be added to the PDF: ${e.message || 'unexpected error'}`;
+  }
+}
+
+// The Apps Script timers report what they emailed.
+async function mailed(db, body) {
+  const id = idOf(body.id);
+  if (body.kind === 'request') await db`update invoice_requests set email_status = 'SENT' where id = ${id}`;
+  else if (body.kind === 'reminder' || body.kind === 'client') {
+    await db`update receivable_invoices set email_thread = ${text(body.thread, 200)},
+               status = case when upper(status) in ('NEW_ENTRY', 'APPROVED') then 'REMINDER' else status end where id = ${id}`;
+  } else throw new Bad('Unknown kind');
+  return { ok: true };
+}
+
+// One-time move: copies both sheet tabs into the database, writes each record's id into the sheet (AppId), then
+// switches the app to the database. Safe to run again: rows that already carry an id are skipped.
+async function importSheet(db, me) {
+  if (me.role !== 'admin') throw new Bad('Only the admin can move Receivables to the database');
+  let d;
+  try {
+    d = await script(db, { action: 'dump' });
+  } catch (e) {
+    if (/unknown action/i.test(e.message)) throw new Bad('The sheet still runs the old script. Paste the new script into the sheet and deploy it first (steps below), then try again.');
+    throw e;
+  }
+  if (!Array.isArray(d.extracts) || !Array.isArray(d.requests)) throw new Bad('Paste the new script into the sheet and deploy it first (see the steps below).');
+  const have = async (table, ids) => {
+    const nums = ids.map(Number).filter(Number.isInteger);
+    if (!nums.length) return new Set();
+    const rows = table === 'r' ? await db`select id from invoice_requests where id = any(${nums}::int[])` : await db`select id from receivable_invoices where id = any(${nums}::int[])`;
+    return new Set(rows.map((x) => String(x.id)));
+  };
+  const haveReq = await have('r', d.requests.map((x) => x.appId).filter(Boolean));
+  const haveExt = await have('e', d.extracts.map((x) => x.appId).filter(Boolean));
+  const newReq = d.requests.filter((x) => !haveReq.has(x.appId));
+  const newExt = d.extracts.filter((x) => !haveExt.has(x.appId));
+  const dt = (v) => (DATE.test(String(v || '')) ? v : null);
+  const reqIds = newReq.length ? (await db.transaction(newReq.map((x) => db`
+    insert into invoice_requests (invoice_type, client, category, invoice_date, description, po_number, amount, email_status, attachments, extra)
+    values (${x.invoiceType || ''}, ${x.client}, ${x.category || ''}, ${dt(x.invoiceDate)}, ${x.description || ''}, ${x.poNumber || 'N/A'}, ${x.amount ?? 0},
+            ${x.emailStatus || 'TO SEND'}, ${x.attachments || ''}, ${JSON.stringify(x.extra || {})}) returning id`))).map((r) => r[0].id) : [];
+  // each invoice is linked to the request with the same client, invoice date and amount (its bills come from there)
+  const allReq = await db`select id, lower(client) as client, to_char(invoice_date, 'YYYY-MM-DD') as d, amount::float8 as amount, attachments, invoice_type as type from invoice_requests`;
+  const reqOf = (x) => allReq.find((q) => q.client === String(x.client).toLowerCase() && q.d === dt(x.invoiceDate) && Math.abs(q.amount - (x.amount ?? 0)) < 0.005);
+  const extIds = newExt.length ? (await db.transaction(newExt.map((x) => {
+    const q = reqOf(x);
+    const bills = x.bills || (q && isReimbType(x.invoiceType) ? q.attachments : '');
+    return db`insert into receivable_invoices (client, invoice_number, invoice_date, category, amount, with_gst, to_receive, due_date, pdf_url, status, email_thread,
+                invoice_type, received_date, bills, pdf_without_bills, pdf_with_bills, extra, request_id, updated_by)
+              values (${x.client}, ${x.invoiceNumber || ''}, ${dt(x.invoiceDate)}, ${x.category || ''}, ${x.amount ?? 0}, ${x.withGst}, ${x.toReceive}, ${dt(x.dueDate)},
+                      ${x.pdfUrl || ''}, ${x.status || 'NEW_ENTRY'}, ${x.thread || ''}, ${x.invoiceType || ''}, ${dt(x.receivedDate)}, ${bills}, ${x.noBills || ''},
+                      ${x.withBills || ''}, ${JSON.stringify(x.extra || {})}, ${q ? q.id : null}, ${me.id}) returning id`;
+  }))).map((r) => r[0].id) : [];
+  try {
+    await script(db, { action: 'stamp', requests: newReq.map((x, i) => ({ row: x.row, client: x.client, id: reqIds[i] })),
+      extracts: newExt.map((x, i) => ({ row: x.row, client: x.client, id: extIds[i] })) });
+  } catch (e) {
+    // nothing was stamped: take the copies back out so a second run doesn't duplicate them
+    if (extIds.length) await db`delete from receivable_invoices where id = any(${extIds}::int[])`;
+    if (reqIds.length) await db`delete from invoice_requests where id = any(${reqIds}::int[])`;
+    throw e;
+  }
+  await setSetting(db, 'receivablesSource', 'db');
+  return { notice: `Moved to the database: ${extIds.length} invoice(s) and ${reqIds.length} Finance Team request(s)${haveExt.size + haveReq.size ? ` (${haveExt.size + haveReq.size} were already in)` : ''}. Receivables now reads from the database.` };
+}
+
 // Reimbursement invoices reach the client with the request's bills from page 2 onwards. The Finance Team's PDF
 // usually has no bills, so on approval the sheet script hands over the invoice and the bills, they are merged here,
 // and the merged PDF is saved next to the invoice in Drive (the row's Invoice link then points at it).
@@ -365,16 +662,34 @@ export default async function handler(req, res) {
     if (req.query.key !== invoiceToken()) return res.status(403).json({ error: 'Wrong key: copy the script again from Receivables, Automator Settings' });
     return res.status(200).json({ config: await readConfig(db), clients: await readClients(db) });
   }
+  // The Apps Script timers report the emails they sent (db mode), with the same key.
+  if (req.method === 'POST' && req.body?.key !== undefined) {
+    if (req.body.key !== invoiceToken()) return res.status(403).json({ error: 'Wrong key' });
+    try {
+      if (req.body.action !== 'mailed') return res.status(400).json({ error: 'Unknown action' });
+      return res.status(200).json(await mailed(db, req.body));
+    } catch (e) {
+      if (e instanceof Bad) return res.status(400).json({ error: e.message });
+      console.error(e);
+      return res.status(500).json({ error: 'Server error' });
+    }
+  }
   const me = await requireUser(req, res);
   if (!me) return;
   if (!isFinanceAdmin(me)) return res.status(403).json({ error: 'Only Admin and Finance Admin can use the Client Invoice Automator' });
   try {
-    if (req.method === 'GET' && req.query.rows) return res.status(200).json(await script(db, { action: 'list' }));
+    if (req.method === 'GET' && req.query.rows) {
+      if (await isDb(db)) return res.status(200).json({ rows: (await invoiceRecords(db)).map(screenRow) });
+      return res.status(200).json(await script(db, { action: 'list' }));
+    }
     let notice;
     if (req.method === 'POST') notice = (await act(db, me, req.body)).notice;
     else if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
     const admin = me.role === 'admin';
+    const dbMode = await isDb(db);
+    const [waiting] = dbMode ? await db`select (select count(*) from receivable_invoices where sheet_error <> '') + (select count(*) from invoice_requests where sheet_error <> '') as n` : [{ n: 0 }];
     return res.status(200).json({
+      dbMode, sheetWaiting: Number(waiting.n),
       config: await readConfig(db), clients: await readClients(db), drafts: await readDrafts(db), rowDrafts: await readRowDrafts(db), notice,
       script: admin ? await getSetting(db, 'invoiceScript') : undefined, key: admin ? invoiceToken() : undefined,
     });

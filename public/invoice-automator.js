@@ -1,6 +1,9 @@
 // Client Invoice Automator on the Receivables page (Admin and Finance Admin only).
 // Talks to /api/client-invoices; the sheet rows and Gmail are reached through the sheet's Apps Script.
-let inv = { config: null, clients: [], drafts: [], rowDrafts: {}, rows: [], admin: false, manageTab: 'NEW_ENTRY' };
+let inv = { config: null, clients: [], drafts: [], rowDrafts: {}, rows: [], admin: false, manageTab: 'NEW_ENTRY', dbMode: false, sheetWaiting: 0 };
+// A row's key: its database id once Receivables is in the database, else its sheet row number.
+const rkey = (r) => (r.id !== undefined ? r.id : r.row);
+const rowByKey = (k) => inv.rows.find((x) => rkey(x) === k);
 
 const TEMPLATES = [
   { key: 'requestTemplate', label: 'Finance Team request email', vars: ['InvoiceType', 'Client', 'PO_Number', 'ItemDescription', 'AmountwithoutGST', 'InvoiceDate'] },
@@ -20,7 +23,7 @@ const isPaid = (r) => r.status.toLowerCase() === 'payment received';
 const isReimbRow = (r) => /reimburs/i.test(r.invoiceType || '');
 // Same key as the server's rowDraftKey: sheet row + client + invoice date.
 const rowDraftKey = (r) => `${r.row}|${r.client.toLowerCase()}|${r.invoiceDateIso || ''}`;
-const rowDraftOf = (r) => inv.rowDrafts[rowDraftKey(r)];
+const rowDraftOf = (r) => (r.draft !== undefined ? r.draft : inv.rowDrafts[rowDraftKey(r)]);
 const localToday = () => { const d = new Date(); return new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 const modal = (id) => bootstrap.Modal.getOrCreateInstance($id(id));
 
@@ -63,6 +66,7 @@ async function invPost(body, done) {
     inv.clients = data.clients;
     inv.drafts = data.drafts;
     inv.rowDrafts = data.rowDrafts || {};
+    engModeInfo(data);
     renderDrafts();
     toast(data.notice || done);
     return data;
@@ -93,21 +97,71 @@ async function startAutomator(admin) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return toast(data.error || 'Could not load the automator settings', false);
   Object.assign(inv, { config: data.config, clients: data.clients, drafts: data.drafts, rowDrafts: data.rowDrafts || {} });
+  engModeInfo(data);
   if (inv.rows.length) renderManage();
   renderClients();
   renderDrafts();
   fillConfig();
   if (admin) {
     $id('cfgScript').value = data.script || '';
-    const code = await fetch('/apps-script/InvoiceAutomator.gs').then((r) => r.text()).catch(() => '');
-    $id('scriptCode').value = code.replace('__APP_URL__', location.origin).replace('__KEY__', data.key);
+    // the script that matches the current mode; the new (database) one is also shown for the move
+    const fill = (code) => code.replace('__APP_URL__', location.origin).replace('__KEY__', data.key);
+    const [sheetCode, dbCode] = await Promise.all(['InvoiceAutomatorSheet.gs', 'InvoiceAutomator.gs'].map((f) => fetch('/apps-script/' + f).then((r) => r.text()).catch(() => '')));
+    $id('scriptCode').value = fill(data.dbMode ? dbCode : sheetCode);
+    $id('dbScriptCode').value = fill(dbCode);
+  }
+}
+
+/* ---------- Database mode ---------- */
+
+// Mode-dependent wording and the admin's "Move to database" card.
+function engModeInfo(data) {
+  if (data.dbMode === undefined) return;
+  inv.dbMode = data.dbMode;
+  inv.sheetWaiting = data.sheetWaiting || 0;
+  $id('manageIntro').innerHTML = inv.dbMode
+    ? 'Invoices requested to the Finance Team. Add the invoice number and PDF link, then <b>Send to client</b>. Approving a reimbursement invoice adds its request\'s bills to the PDF from page 2. Reminders then go out by themselves at the configured intervals until you mark the payment received. Each change is copied to the sheet, which sends the emails.'
+    : 'Rows of the sheet\'s Invoice Extracts tab. Add the invoice number and PDF link, then <b>Send to client</b>. Approving a reimbursement invoice adds its request\'s bills to the PDF from page 2. Reminders then go out by themselves at the configured intervals until you mark the payment received.';
+  $id('dbTools').classList.toggle('d-none', !inv.dbMode);
+  $id('resyncBtn').innerHTML = `<i class="fa-solid fa-arrows-rotate me-1"></i>Retry sheet sync${inv.sheetWaiting ? ` <span class="badge bg-danger">${inv.sheetWaiting}</span>` : ''}`;
+  $id('rowSaveBtn').textContent = inv.dbMode ? 'Save' : 'Save to sheet';
+  const box = $id('dbMoveState');
+  if (box) box.innerHTML = inv.dbMode
+    ? '<span class="badge bg-success-subtle text-success-emphasis border"><i class="fa-solid fa-database me-1"></i>Receivables are in the database</span> The sheet keeps the two tabs only for mailing.'
+    : '<span class="badge bg-warning-subtle text-warning-emphasis border"><i class="fa-solid fa-table me-1"></i>Receivables still read from the sheet</span>';
+  $id('dbMoveBtn').classList.toggle('d-none', inv.dbMode);
+}
+
+async function moveToDatabase() {
+  if (!confirm('Copy the sheet\'s Invoice Extracts and RequestInvoice tabs into the database and switch Receivables to it?\n\nDo this right after pasting and deploying the new script.')) return;
+  if (await invPost({ action: 'importSheet' }, 'Moved')) { inv.rows = []; loadData(); }
+}
+async function resyncSheet() { if (await invPost({ action: 'resync' }, 'Synced')) loadRows(); }
+async function syncMail() { if (await invPost({ action: 'syncMail' }, 'Checked')) { loadRows(); loadData(); } }
+async function compareDashboard() {
+  const done = busy('Reading both…');
+  try {
+    const res = await fetch('/api/receivables?compare=1', { cache: 'no-store' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not compare');
+    const rows = [['Total revenue', 'total', 'count'], ['Received', 'received', 'countReceived'], ['Receivables', 'pending', 'countPending'], ['Upcoming (excl. GST)', 'upcoming', 'countUpcoming']];
+    $id('compareOut').innerHTML = `<table class="table table-sm small mb-1 mt-2"><thead><tr><th></th><th class="text-end">Database</th><th class="text-end">Sheet dashboard</th><th></th></tr></thead><tbody>`
+      + rows.map(([label, k, c]) => {
+        const same = data.sheet && Math.abs(data.db[k] - data.sheet[k]) < 0.01 && data.db[c] === data.sheet[c];
+        return `<tr><td>${label}</td><td class="text-end">${formatINR(data.db[k])} (${data.db[c]})</td><td class="text-end">${data.sheet ? `${formatINR(data.sheet[k])} (${data.sheet[c]})` : '–'}</td>
+          <td>${data.sheet ? (same ? '<i class="fa-solid fa-check text-success" title="Same"></i>' : '<i class="fa-solid fa-not-equal text-danger" title="Different"></i>') : ''}</td></tr>`;
+      }).join('') + '</tbody></table>' + (data.sheetError ? `<div class="text-danger small">Sheet dashboard: ${esc(data.sheetError)}</div>` : '');
+  } catch (e) {
+    toast(e.message, false);
+  } finally {
+    done();
   }
 }
 
 /* ---------- Manage invoices ---------- */
 
 async function loadRows() {
-  $id('manageTable').innerHTML = '<tr><td class="text-muted py-4 text-center">Loading from the sheet…</td></tr>';
+  $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.dbMode ? 'Loading…' : 'Loading from the sheet…'}</td></tr>`;
   try {
     const res = await fetch('/api/client-invoices?rows=1', { cache: 'no-store' });
     const data = await res.json().catch(() => ({}));
@@ -151,18 +205,19 @@ function renderManage() {
           <div class="d-flex align-items-center flex-wrap gap-2 mt-1">
             <span class="badge badge-soft ${reimb ? 'badge-type-reimb' : 'badge-type-service'}" style="font-size:10px">${reimb ? 'Reimbursement' : 'Service'}</span>
             ${r.invoiceNumber ? `<span class="inv-no">${esc(r.invoiceNumber)}</span>` : '<span class="inv-no text-muted fst-italic">No invoice no. yet</span>'}
-            ${draft ? `<span class="badge badge-soft badge-soft-upcoming" style="font-size:10px" title="Draft by ${esc(draft.by)} on ${esc(draft.on)}, not yet in the sheet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span>` : ''}
+            ${draft ? `<span class="badge badge-soft badge-soft-upcoming" style="font-size:10px" title="Draft by ${esc(draft.by)} on ${esc(draft.on)}, not saved yet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span>` : ''}
+            ${r.sheetError ? `<span class="badge bg-danger-subtle text-danger-emphasis border" style="font-size:10px" title="Not in the sheet yet: ${esc(r.sheetError)}"><i class="fa-solid fa-triangle-exclamation me-1"></i>Sheet copy failed</span>` : ''}
           </div></td>
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
         <td class="text-end" title="${isReimbRow(r) ? 'Amount with GST (reimbursement, no TDS)' : 'Amount with GST − 10% TDS on the amount w/o GST'}">${receivableOf(r) ? formatINR(receivableOf(r)) : '<span class="text-muted" title="Add the amount with GST to see this">-</span>'}</td>
         <td>${esc(paidTab ? r.receivedDate || '-' : r.dueDate)}</td>
-        <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${r.row})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}
+        <td>${link ? `<button type="button" class="btn btn-light border btn-sm" onclick="previewPdf(${rkey(r)})"><i class="fa-solid fa-file-pdf"></i> PDF</button>` : '<span class="text-muted">-</span>'}
           ${reimb && r.billCount ? `<div class="inv-no mt-1 ${r.billsAttached ? 'text-success' : 'text-muted'}"><i class="fa-solid fa-paperclip me-1"></i>${r.billCount} bill${r.billCount > 1 ? 's' : ''}${r.billsAttached ? ' included' : ' (added on approval)'}</div>` : ''}</td>
         <td class="text-end text-nowrap">
-          <button class="btn btn-light border btn-sm" onclick="openRow(${r.row})"><i class="fa-solid fa-pen"></i> Update</button>
-          ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${r.row})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
-          ${r.status.toUpperCase() === 'NEW_ENTRY' ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteRow(${r.row})" title="Delete this new entry" aria-label="Delete invoice for ${esc(r.client)}"><i class="fa-solid fa-trash"></i></button>` : ''}
+          <button class="btn btn-light border btn-sm" onclick="openRow(${rkey(r)})"><i class="fa-solid fa-pen"></i> Update</button>
+          ${ready ? `<button class="btn btn-primary btn-sm" onclick="sendToClient(${rkey(r)})"><i class="fa-solid fa-envelope"></i> Send to client</button>` : ''}
+          ${r.status.toUpperCase() === 'NEW_ENTRY' ? `<button class="btn btn-outline-danger btn-sm" onclick="deleteRow(${rkey(r)})" title="Delete this new entry" aria-label="Delete invoice for ${esc(r.client)}"><i class="fa-solid fa-trash"></i></button>` : ''}
         </td></tr>`;
     }).join('') + '</tbody>';
 }
@@ -180,14 +235,14 @@ function openPdf(url, title) {
 }
 $id('pdfModal').addEventListener('hidden.bs.modal', () => { $id('pdfFrame').src = 'about:blank'; }); // stop loading once closed
 
-function previewPdf(rowNo) {
-  const r = inv.rows.find((x) => x.row === rowNo);
+function previewPdf(key) {
+  const r = rowByKey(key);
   openPdf(r.pdfUrl, `Invoice ${r.invoiceNumber || ''} · ${r.client}`);
 }
 
 let editingRow = null;
-function openRow(rowNo) {
-  editingRow = inv.rows.find((r) => r.row === rowNo);
+function openRow(key) {
+  editingRow = rowByKey(key);
   const d = rowDraftOf(editingRow); // a saved draft takes the place of the sheet's values
   $id('rowInfo').innerText = `${editingRow.client} · invoice date ${editingRow.invoiceDate} · ${formatINR(editingRow.amount)}`;
   $id('rwDraftNote').classList.toggle('d-none', !d);
@@ -225,7 +280,7 @@ function rowReadiness() {
   // Opened unchanged: show what the sheet holds, and flag it if saving would change it.
   const sheet = gst > 0 && gst === editingRow.withGst ? editingRow.toReceive : 0;
   $id('rwToReceive').innerText = gst > 0 ? formatINR(calc) : '-';
-  $id('rwSheetNote').innerText = sheet && Math.abs(sheet - calc) > 0.005 ? ` The sheet now has ${formatINR(sheet)}; saving replaces it.` : '';
+  $id('rwSheetNote').innerText = sheet && Math.abs(sheet - calc) > 0.005 ? ` It is now ${formatINR(sheet)}; saving replaces it.` : '';
   const missing = rowMissing();
   const sel = $id('rwStatus');
   [...sel.options].forEach((o) => { if (NEEDS_DETAILS.includes(o.value)) o.disabled = missing.length > 0 && o.value !== sel.value; });
@@ -264,12 +319,12 @@ async function saveRow(e) {
   const attach = !$id('rwBillsBox').classList.contains('d-none') && $id('rwBills').checked;
   if (attach) btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding the bills…';
   const ok = await invPost({ action: 'update', update: { ...rowForm(), attachBills: attach, rebuildBills: attach && editingRow.billsAttached } }, 'Saved');
-  btn.innerText = 'Save to sheet';
+  btn.innerText = inv.dbMode ? 'Save' : 'Save to sheet';
   btn.disabled = false;
   if (ok) { modal('rowModal').hide(); loadRows(); loadData(); }
 }
 
-const rowForm = () => ({ row: editingRow.row, client: editingRow.client, invoiceDateIso: editingRow.invoiceDateIso || '', invoiceNumber: $id('rwNumber').value,
+const rowForm = () => ({ row: editingRow.row, id: editingRow.id, client: editingRow.client, invoiceDateIso: editingRow.invoiceDateIso || '', invoiceNumber: $id('rwNumber').value,
   pdfUrl: $id('rwPdf').value, withGst: $id('rwGst').value, status: $id('rwStatus').value, receivedDate: $id('rwReceived').value });
 
 // Keeps what is filled in so far in the app only; the sheet row is untouched until Save to sheet.
@@ -277,26 +332,26 @@ async function saveRowDraft(btn) {
   btn.disabled = true;
   const ok = await invPost({ action: 'rowDraft', update: rowForm() }, 'Draft saved');
   btn.disabled = false;
-  if (ok) { modal('rowModal').hide(); renderManage(); }
+  if (ok) { modal('rowModal').hide(); if (inv.dbMode) loadRows(); else renderManage(); }
 }
 
 async function discardRowDraft() {
   if (!confirm('Discard this draft? The form goes back to what the sheet has.')) return;
-  if (await invPost({ action: 'deleteRowDraft', update: rowForm() }, 'Draft discarded')) { renderManage(); openRow(editingRow.row); }
+  if (await invPost({ action: 'deleteRowDraft', update: rowForm() }, 'Draft discarded')) { if (inv.dbMode) await loadRows(); else renderManage(); openRow(rkey(editingRow)); }
 }
 
 // New entries only: removes the row from the sheet (and its request, if the Finance Team hasn't been emailed yet).
-async function deleteRow(rowNo) {
-  const r = inv.rows.find((x) => x.row === rowNo);
-  if (!confirm(`Delete the new entry for ${r.client} (invoice date ${r.invoiceDate}, ${formatINR(r.amount)})?\n\nThe row is removed from the sheet's Invoice Extracts tab. This can't be undone.`)) return;
-  if (await invPost({ action: 'delete', update: { row: r.row, client: r.client, invoiceDateIso: r.invoiceDateIso || '' } }, 'Deleted')) loadRows();
+async function deleteRow(key) {
+  const r = rowByKey(key);
+  if (!confirm(`Delete the new entry for ${r.client} (invoice date ${r.invoiceDate}, ${formatINR(r.amount)})?\n\nIt is removed${inv.dbMode ? '' : " from the sheet's Invoice Extracts tab"}. This can't be undone.`)) return;
+  if (await invPost({ action: 'delete', update: { row: r.row, id: r.id, client: r.client, invoiceDateIso: r.invoiceDateIso || '' } }, 'Deleted')) { loadRows(); loadData(); }
 }
 
-async function sendToClient(rowNo) {
-  const r = inv.rows.find((x) => x.row === rowNo);
+async function sendToClient(key) {
+  const r = rowByKey(key);
   const c = inv.clients.find((x) => x.name.toLowerCase() === r.client.toLowerCase());
   if (!confirm(`Email invoice ${r.invoiceNumber} to ${r.client}${c ? ` (${c.emails})` : ''} with the PDF attached?`)) return;
-  if (await invPost({ action: 'send', row: r.row, client: r.client }, 'Sent')) loadRows();
+  if (await invPost({ action: 'send', row: r.row, id: r.id, client: r.client }, 'Sent')) { loadRows(); loadData(); }
 }
 
 /* ---------- Request invoice ---------- */
