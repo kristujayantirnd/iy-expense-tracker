@@ -6,7 +6,9 @@ const UNIT_SHORT = { per_head: 'hd', per_head_month: 'hd×mo', per_batch: 'bt', 
 const UNIT_LABEL = { per_head: 'Head count', per_head_month: 'Heads × months', per_batch: 'Batches', per_hour: 'Hours', per_day: 'Days', per_month: 'Months', fixed: 'Fixed' };
 const engR2 = (n) => Math.round(n * 100) / 100;
 const engMoney = (n) => formatINR(Number(n) || 0);
-const engPct = (n) => (n === null || !Number.isFinite(n) ? '–' : `${n > 0 ? '+' : ''}${n.toFixed(1)}%`);
+const engPct = (n) => (n === null || !Number.isFinite(n) ? '–' : `${n.toFixed(1)}%`);
+// Profitability index colour: below 100% red, above green, at 100% plain.
+const engPiClass = (n, plain = '') => (n === null || !Number.isFinite(n) ? plain : n < 99.95 ? 'text-danger' : n > 100.05 ? 'text-success' : plain);
 const engItem = (id) => E.itemMap.get(id);
 const engCanEdit = () => E.data && E.data.canEdit;
 const engEmployee = (id) => (E.data.employees.find((u) => u.id === id) || {}).name;
@@ -368,8 +370,8 @@ async function engDeleteCard(id) {
 // Per Head-Monthly: unit price x heads x months.
 const engActual = (r) => engR2((Number(r.unitPrice) || 0) * (Number(r.units) || 0) * (r.pricingModel === 'per_head_month' ? Number(r.months ?? 1) || 0 : 1));
 const engSigned = (r) => (r.signedUp === null || r.signedUp === '' || r.signedUp === undefined ? engActual(r) : engR2(Number(r.signedUp) || 0));
-// Variation = 100 - signed up as % of actual: a discount shows positive (e.g. +10%), a premium negative.
-const engVar = (actual, signed) => (actual ? 100 - (signed / actual) * 100 : signed ? null : 0);
+// Profitability index = signed up as % of the actual price (₹62,500 of ₹1,00,000 = 62.5%; 100% = signed at the actual price).
+const engVar = (actual, signed) => (actual ? (signed / actual) * 100 : null);
 const engTotals = (rows) => { const actual = engR2(rows.reduce((s, r) => s + engActual(r), 0)); const signed = engR2(rows.reduce((s, r) => s + engSigned(r), 0)); return { actual, signed, variation: engVar(actual, signed) }; };
 
 function engRenderPlans() {
@@ -380,13 +382,13 @@ function engRenderPlans() {
   const plans = E.data.plans.filter((p) => { const hay = `${p.client} ${p.name}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
   if (!plans.length) { $id('cpTable').innerHTML = `<tr><td class="text-muted text-center py-4">${E.data.plans.length ? 'Nothing matches the search.' : 'No engagement plans yet.' + (engCanEdit() ? ' Use Apply rate card to client.' : '')}</td></tr>`; return; }
   const drag = engCanEdit() && !words.length; // the order is the whole list's, so no dragging while searching
-  $id('cpTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Plan</th><th>From rate card</th><th class="text-end">Actual price</th><th class="text-end">Signed up</th><th class="text-end">Variation</th><th>Status</th><th></th></tr></thead><tbody>`
+  $id('cpTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Plan</th><th>From rate card</th><th class="text-end">Actual price</th><th class="text-end">Signed up</th><th class="text-end">Profitability index</th><th>Status</th><th></th></tr></thead><tbody>`
     + plans.map((p) => {
       const t = engTotals(p.items);
       const card = E.data.rateCards.find((c) => c.id === p.rateCardId);
       return `<tr ${drag ? `ondragstart="engDragStart(event, 'plan', ${p.id})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, 'plan')" ondrop="engDropPlan(event, ${p.id})"` : ''}>
         <td style="white-space:normal;min-width:12rem">${drag ? engGrip() : ''}${esc(p.client)}</td><td class="fw-semibold">${esc(p.name)}</td><td>${card ? esc(card.name) : '<span class="text-muted">–</span>'}</td>
-        <td class="text-end">${engMoney(t.actual)}</td><td class="text-end fw-semibold">${engMoney(t.signed)}</td><td class="text-end ${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : ''}">${engPct(t.variation)}</td>
+        <td class="text-end">${engMoney(t.actual)}</td><td class="text-end fw-semibold">${engMoney(t.signed)}</td><td class="text-end ${engPiClass(t.variation)}">${engPct(t.variation)}</td>
         <td>${p.frozenTotal != null ? `<span class="badge badge-soft badge-soft-upcoming" title="Frozen by ${esc(p.frozenBy || '')} on ${esc(p.frozenOn || '')}"><i class="fa-solid fa-lock me-1"></i>Frozen</span>` : '<span class="badge badge-soft badge-soft-pending">Draft</span>'}</td>
         <td class="text-end text-nowrap"><button class="btn btn-light border btn-sm" onclick="engOpenPlan(${p.id})"><i class="fa-solid fa-table-list"></i> Cost structure</button>
         ${engCanEdit() && (p.frozenTotal == null || E.data.admin) ? `<button class="btn btn-outline-danger btn-sm" onclick="engDeletePlan(${p.id})" aria-label="Delete plan ${esc(p.name)}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`;
@@ -506,7 +508,7 @@ function engPlanFigures() {
     const a = engActual(r), s = engSigned(r), v = engVar(a, s);
     const set = (k, html) => { const el = document.getElementById(`cp-${k}-${i}`); if (el) el.innerHTML = html; };
     set('actual', engMoney(a));
-    set('var', `<span class="${v > 0 ? 'text-danger' : v < 0 ? 'text-success' : 'text-muted'}">${engPct(v)}</span>`);
+    set('var', `<span class="${engPiClass(v, 'text-muted')}">${engPct(v)}</span>`);
     const inp = document.getElementById(`cp-signed-${i}`);
     if (inp && document.activeElement !== inp && r.signedUp === null) inp.value = a || '';
     if (inp) inp.classList.toggle('border-warning', r.signedUp !== null && engR2(r.signedUp) !== a);
@@ -514,12 +516,12 @@ function engPlanFigures() {
   for (const g of engPlanGroups(E.plan.items)) {
     const t = engTotals(g.items);
     const el = document.getElementById(`cp-sub-${g.product.id}`);
-    if (el) el.innerHTML = `${engMoney(t.actual)} → <b>${engMoney(t.signed)}</b> <span class="${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : 'text-muted'}">(${engPct(t.variation)})</span>`;
+    if (el) el.innerHTML = `${engMoney(t.actual)} → <b>${engMoney(t.signed)}</b> <span class="${engPiClass(t.variation, 'text-muted')}">(${engPct(t.variation)})</span>`;
   }
   const t = engTotals(E.plan.items);
   $id('cp-total-actual').textContent = engMoney(t.actual);
   $id('cp-total-signed').textContent = engMoney(t.signed);
-  $id('cp-total-var').innerHTML = `<span class="${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : ''}">${engPct(t.variation)}</span>`;
+  $id('cp-total-var').innerHTML = `<span class="${engPiClass(t.variation)}">${engPct(t.variation)}</span>`;
   const fz = $id('cp-frozen');
   if (fz && E.plan.frozenTotal != null) {
     const diff = engR2(E.plan.frozenTotal - t.signed);
@@ -643,7 +645,7 @@ function engRenderPlan() {
     </div>`}
     <div class="table-responsive"><table class="table align-middle small mb-0">
       <thead class="bg-light"><tr><th style="min-width:13rem">List item</th><th>Pricing model</th><th style="min-width:9rem" class="text-end">Units</th><th style="width:9rem" class="text-end">Unit price (₹)</th>
-        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end" title="100 − signed up as % of the actual price: a discount shows positive">Variation</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
+        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:7rem" class="text-end" title="Signed up as % of the actual price (100% = signed at the actual price)">Profitability index</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
       <tbody>${groups.map((g) => {
         const missing = g.product.items.filter((m) => !inPlan.has(m.id));
         const shut = E.collapsed.has(`cp:${g.product.id}`);
