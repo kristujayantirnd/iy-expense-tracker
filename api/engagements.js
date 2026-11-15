@@ -263,12 +263,20 @@ async function savePlan(db, me, body) {
     db`select item_id, pricing_model, mandatory, prerequisites from rate_card_items where rate_card_id = ${plan.rate_card_id ?? 0}`,
     db`select id as item_id, pricing_model, mandatory, prerequisites from ps_items`,
   ]);
+  const masterIds = new Set(master.map((m) => m.item_id));
   const attrs = (itemId) => own.find((r) => r.item_id === itemId) || card.find((r) => r.item_id === itemId) || master.find((r) => r.item_id === itemId);
   const seen = new Set();
   const items = rows.map((it) => {
     const itemId = intId(it?.itemId, 'list item');
-    const a = attrs(itemId);
-    if (!a) throw new Bad('A list item in this plan no longer exists, please reload');
+    const known = attrs(itemId);
+    if (!known) throw new Bad('A list item in this plan no longer exists, please reload');
+    // The tags shown on screen win (a row removed and added back picks up the rate card's current tags);
+    // anything not sent keeps the plan's own copy, else the rate card's, else the master's.
+    const a = {
+      pricing_model: it.pricingModel ? pricing(it.pricingModel) : known.pricing_model,
+      mandatory: typeof it.mandatory === 'boolean' ? it.mandatory : known.mandatory,
+      prerequisites: Array.isArray(it.prerequisites) ? [...new Set(it.prerequisites.map(Number))].filter((x) => x !== itemId && masterIds.has(x)) : known.prerequisites,
+    };
     if (seen.has(itemId)) throw new Bad('A list item is in the plan twice');
     seen.add(itemId);
     const units = a.pricing_model === 'fixed' ? 1 : num(it.units, 1e6, 'Units');

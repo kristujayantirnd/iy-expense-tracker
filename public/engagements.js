@@ -194,14 +194,25 @@ function engRenderCards() {
   $id('rcEditor').classList.add('d-none');
   const cards = E.data.rateCards;
   if (!cards.length) { $id('rcTable').innerHTML = `<tr><td class="text-muted text-center py-4">No rate cards yet.${engCanEdit() ? ' Create one with New rate card.' : ''}</td></tr>`; return; }
-  $id('rcTable').innerHTML = `<thead class="bg-light"><tr><th>Rate card</th><th>Products / services</th><th class="text-end">List items</th><th>Updated</th><th></th></tr></thead><tbody>`
+  $id('rcTable').innerHTML = `<thead class="bg-light"><tr><th>Rate card</th><th>Products / services</th><th class="text-end">List items</th><th>Updated</th></tr></thead><tbody>`
     + cards.map((c) => {
       const products = [...new Set(c.items.map((i) => engItem(i.itemId)?.product).filter(Boolean))];
-      return `<tr><td><div class="fw-semibold">${esc(c.name)}</div>${c.description ? `<div class="text-muted">${esc(c.description)}</div>` : ''}</td>
-        <td style="white-space:normal">${products.map(esc).join(', ') || '<span class="text-muted">–</span>'}</td><td class="text-end">${c.items.length}</td><td>${esc(c.updatedOn)}</td>
-        <td class="text-end text-nowrap"><button class="btn btn-light border btn-sm" onclick="engOpenCard(${c.id})"><i class="fa-solid fa-${engCanEdit() ? 'pen' : 'eye'}"></i> ${engCanEdit() ? 'Edit' : 'View'}</button>
-        ${engCanEdit() ? `<button class="btn btn-outline-danger btn-sm" onclick="engDeleteCard(${c.id})" aria-label="Delete ${esc(c.name)}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`;
+      return `<tr style="cursor:pointer" onclick="engOpenCard(${c.id})" title="${engCanEdit() ? 'Click to edit' : 'Click to view'}">
+        <td><a href="#" class="fw-semibold text-decoration-none" onclick="event.preventDefault()">${esc(c.name)}</a>${c.description ? `<div class="text-muted">${esc(c.description)}</div>` : ''}</td>
+        <td style="white-space:normal">${products.map(esc).join(', ') || '<span class="text-muted">–</span>'}</td><td class="text-end">${c.items.length}</td><td>${esc(c.updatedOn)}</td></tr>`;
     }).join('') + '</tbody>';
+}
+
+// A copy of a rate card, opened unsaved (Save creates it).
+function engDuplicateCard() {
+  const src = E.card;
+  const names = new Set(E.data.rateCards.map((c) => c.name.toLowerCase()));
+  let name = `${src.name} (copy)`;
+  for (let n = 2; names.has(name.toLowerCase()); n++) name = `${src.name} (copy ${n})`;
+  E.card = { id: null, name, description: src.description, items: src.items.map((i) => ({ ...i, prerequisites: [...i.prerequisites] })) };
+  engRenderCard();
+  toast('Copy opened. Change what you need, then Save rate card.');
+  $id('rcName').focus();
 }
 
 function engOpenCard(id) {
@@ -289,7 +300,10 @@ function engRenderCard() {
   $id('rcEditor').innerHTML = `
     <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
       <button class="btn btn-light border btn-sm" onclick="engCloseCard()"><i class="fa-solid fa-arrow-left me-1"></i>All rate cards</button>
-      ${ro ? '' : `<div class="d-flex gap-2"><button class="btn btn-light border btn-sm" onclick="engCloseCard()">Cancel</button><button class="btn btn-primary btn-sm fw-semibold" onclick="engSaveCard()"><i class="fa-solid fa-floppy-disk me-1"></i>Save rate card</button></div>`}
+      ${ro ? '' : `<div class="d-flex gap-2 align-items-center">
+        ${c.id ? `<button class="btn btn-outline-danger btn-sm" onclick="engDeleteCard(${c.id})" title="Delete this rate card" aria-label="Delete this rate card"><i class="fa-solid fa-trash"></i></button>
+          <button class="btn btn-light border btn-sm" onclick="engDuplicateCard()" title="Make a copy of this rate card"><i class="fa-solid fa-copy me-1"></i>Duplicate</button>` : '<span class="badge bg-info-subtle text-info-emphasis border">New, not saved yet</span>'}
+        <button class="btn btn-light border btn-sm" onclick="engCloseCard()">Cancel</button><button class="btn btn-primary btn-sm fw-semibold" onclick="engSaveCard()"><i class="fa-solid fa-floppy-disk me-1"></i>Save rate card</button></div>`}
     </div>
     <div class="row g-3 mb-3">
       <div class="col-md-4"><label class="form-label small fw-semibold" for="rcName">Rate card name</label><input id="rcName" class="form-control" maxlength="150" value="${esc(c.name)}" ${ro ? 'disabled' : ''} oninput="E.card.name = this.value"></div>
@@ -346,7 +360,7 @@ async function engSaveCard() {
 async function engDeleteCard(id) {
   const c = E.data.rateCards.find((x) => x.id === id);
   if (!confirm(`Delete the rate card ${c.name}? Client plans made from it keep their own copy.`)) return;
-  await engPost({ action: 'deleteRateCard', id }, 'Deleted');
+  if (await engPost({ action: 'deleteRateCard', id }, 'Deleted')) { E.card = null; engRenderCards(); }
 }
 
 /* ---------- Engagement plans ---------- */
@@ -354,7 +368,8 @@ async function engDeleteCard(id) {
 // Per Head-Monthly: unit price x heads x months.
 const engActual = (r) => engR2((Number(r.unitPrice) || 0) * (Number(r.units) || 0) * (r.pricingModel === 'per_head_month' ? Number(r.months ?? 1) || 0 : 1));
 const engSigned = (r) => (r.signedUp === null || r.signedUp === '' || r.signedUp === undefined ? engActual(r) : engR2(Number(r.signedUp) || 0));
-const engVar = (actual, signed) => (actual ? ((signed - actual) / actual) * 100 : signed ? null : 0);
+// Variation = 100 - signed up as % of actual: a discount shows positive (e.g. +10%), a premium negative.
+const engVar = (actual, signed) => (actual ? 100 - (signed / actual) * 100 : signed ? null : 0);
 const engTotals = (rows) => { const actual = engR2(rows.reduce((s, r) => s + engActual(r), 0)); const signed = engR2(rows.reduce((s, r) => s + engSigned(r), 0)); return { actual, signed, variation: engVar(actual, signed) }; };
 
 function engRenderPlans() {
@@ -371,7 +386,7 @@ function engRenderPlans() {
       const card = E.data.rateCards.find((c) => c.id === p.rateCardId);
       return `<tr ${drag ? `ondragstart="engDragStart(event, 'plan', ${p.id})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, 'plan')" ondrop="engDropPlan(event, ${p.id})"` : ''}>
         <td style="white-space:normal;min-width:12rem">${drag ? engGrip() : ''}${esc(p.client)}</td><td class="fw-semibold">${esc(p.name)}</td><td>${card ? esc(card.name) : '<span class="text-muted">–</span>'}</td>
-        <td class="text-end">${engMoney(t.actual)}</td><td class="text-end fw-semibold">${engMoney(t.signed)}</td><td class="text-end ${t.variation < 0 ? 'text-danger' : t.variation > 0 ? 'text-success' : ''}">${engPct(t.variation)}</td>
+        <td class="text-end">${engMoney(t.actual)}</td><td class="text-end fw-semibold">${engMoney(t.signed)}</td><td class="text-end ${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : ''}">${engPct(t.variation)}</td>
         <td>${p.frozenTotal != null ? `<span class="badge badge-soft badge-soft-upcoming" title="Frozen by ${esc(p.frozenBy || '')} on ${esc(p.frozenOn || '')}"><i class="fa-solid fa-lock me-1"></i>Frozen</span>` : '<span class="badge badge-soft badge-soft-pending">Draft</span>'}</td>
         <td class="text-end text-nowrap"><button class="btn btn-light border btn-sm" onclick="engOpenPlan(${p.id})"><i class="fa-solid fa-table-list"></i> Cost structure</button>
         ${engCanEdit() && (p.frozenTotal == null || E.data.admin) ? `<button class="btn btn-outline-danger btn-sm" onclick="engDeletePlan(${p.id})" aria-label="Delete plan ${esc(p.name)}"><i class="fa-solid fa-trash"></i></button>` : ''}</td></tr>`;
@@ -491,7 +506,7 @@ function engPlanFigures() {
     const a = engActual(r), s = engSigned(r), v = engVar(a, s);
     const set = (k, html) => { const el = document.getElementById(`cp-${k}-${i}`); if (el) el.innerHTML = html; };
     set('actual', engMoney(a));
-    set('var', `<span class="${v < 0 ? 'text-danger' : v > 0 ? 'text-success' : 'text-muted'}">${engPct(v)}</span>`);
+    set('var', `<span class="${v > 0 ? 'text-danger' : v < 0 ? 'text-success' : 'text-muted'}">${engPct(v)}</span>`);
     const inp = document.getElementById(`cp-signed-${i}`);
     if (inp && document.activeElement !== inp && r.signedUp === null) inp.value = a || '';
     if (inp) inp.classList.toggle('border-warning', r.signedUp !== null && engR2(r.signedUp) !== a);
@@ -499,12 +514,12 @@ function engPlanFigures() {
   for (const g of engPlanGroups(E.plan.items)) {
     const t = engTotals(g.items);
     const el = document.getElementById(`cp-sub-${g.product.id}`);
-    if (el) el.innerHTML = `${engMoney(t.actual)} → <b>${engMoney(t.signed)}</b> <span class="${t.variation < 0 ? 'text-danger' : t.variation > 0 ? 'text-success' : 'text-muted'}">(${engPct(t.variation)})</span>`;
+    if (el) el.innerHTML = `${engMoney(t.actual)} → <b>${engMoney(t.signed)}</b> <span class="${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : 'text-muted'}">(${engPct(t.variation)})</span>`;
   }
   const t = engTotals(E.plan.items);
   $id('cp-total-actual').textContent = engMoney(t.actual);
   $id('cp-total-signed').textContent = engMoney(t.signed);
-  $id('cp-total-var').innerHTML = `<span class="${t.variation < 0 ? 'text-danger' : t.variation > 0 ? 'text-success' : ''}">${engPct(t.variation)}</span>`;
+  $id('cp-total-var').innerHTML = `<span class="${t.variation > 0 ? 'text-danger' : t.variation < 0 ? 'text-success' : ''}">${engPct(t.variation)}</span>`;
   const fz = $id('cp-frozen');
   if (fz && E.plan.frozenTotal != null) {
     const diff = engR2(E.plan.frozenTotal - t.signed);
@@ -627,8 +642,8 @@ function engRenderPlan() {
       <button class="btn btn-light border btn-sm" onclick="engPlanAddProduct()"><i class="fa-solid fa-plus me-1"></i>Add with its list items</button>
     </div>`}
     <div class="table-responsive"><table class="table align-middle small mb-0">
-      <thead class="bg-light"><tr><th style="min-width:13rem">List item</th><th>Pricing model</th><th style="width:8rem" class="text-end">Units</th><th style="width:9rem" class="text-end">Unit price (₹)</th>
-        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end">Variation</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
+      <thead class="bg-light"><tr><th style="min-width:13rem">List item</th><th>Pricing model</th><th style="min-width:9rem" class="text-end">Units</th><th style="width:9rem" class="text-end">Unit price (₹)</th>
+        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end" title="100 − signed up as % of the actual price: a discount shows positive">Variation</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
       <tbody>${groups.map((g) => {
         const missing = g.product.items.filter((m) => !inPlan.has(m.id));
         const shut = E.collapsed.has(`cp:${g.product.id}`);
@@ -645,10 +660,10 @@ function engRenderPlan() {
             <td class="ps-3">${ro ? '' : engGrip()}${esc(m.name)}${r.mandatory ? ' <span class="badge badge-soft badge-soft-pending ms-1" style="font-size:10px">Mandatory</span>' : ''}
               ${needs.length ? `<div class="text-muted" style="font-size:11px">Needs: ${needs.map(esc).join(', ')}</div>` : ''}</td>
             <td>${E.data.pricing[r.pricingModel]}</td>
-            <td>${perMonth ? `<div class="d-flex gap-1">
-                <div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${r.units}" ${ro ? 'disabled' : ''} aria-label="Head count, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="Head count">hd</span></div>
-                <div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${r.months ?? 1}" ${ro ? 'disabled' : ''} aria-label="Months, ${esc(m.name)}" oninput="engPlanSet(${i}, 'months', this.value)"><span class="input-group-text px-1 py-0 small" title="Months">mo</span></div></div>`
-              : `<div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${fixed ? 1 : r.units}" ${fixed || ro ? 'disabled' : ''} aria-label="${UNIT_LABEL[r.pricingModel]}, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="${UNIT_LABEL[r.pricingModel]}">${UNIT_SHORT[r.pricingModel]}</span></div>`}</td>
+            <td>${perMonth ? `<div class="d-flex flex-column gap-1">
+                <div class="input-group input-group-sm flex-nowrap" style="min-width:6.5rem"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" style="min-width:3.5rem" value="${r.units}" ${ro ? 'disabled' : ''} aria-label="Head count, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="Head count">hd</span></div>
+                <div class="input-group input-group-sm flex-nowrap" style="min-width:6.5rem"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" style="min-width:3.5rem" value="${r.months ?? 1}" ${ro ? 'disabled' : ''} aria-label="Months, ${esc(m.name)}" oninput="engPlanSet(${i}, 'months', this.value)"><span class="input-group-text px-1 py-0 small" title="Months">mo</span></div></div>`
+              : `<div class="input-group input-group-sm flex-nowrap" style="min-width:6.5rem"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" style="min-width:3.5rem" value="${fixed ? 1 : r.units}" ${fixed || ro ? 'disabled' : ''} aria-label="${UNIT_LABEL[r.pricingModel]}, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="${UNIT_LABEL[r.pricingModel]}">${UNIT_SHORT[r.pricingModel]}</span></div>`}</td>
             <td><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end" value="${r.unitPrice || ''}" placeholder="0" ${ro ? 'disabled' : ''} aria-label="Unit price, ${esc(m.name)}" oninput="engPlanSet(${i}, 'unitPrice', this.value)"></td>
             <td class="text-end" id="cp-actual-${i}"></td>
             <td><div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="0.01" id="cp-signed-${i}" class="form-control form-control-sm text-end" value="${engSigned(r) || ''}" ${ro ? 'disabled' : ''} aria-label="Signed up, ${esc(m.name)}" oninput="engPlanSet(${i}, 'signedUp', this.value)" title="Copied from the actual price; change it to record the signed-up amount">
@@ -664,7 +679,8 @@ function engRenderPlan() {
 }
 
 const engPlanBody = () => ({ id: E.plan.id, name: E.plan.name, notes: E.plan.notes,
-  items: engPlanGroups(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, unitPrice: r.unitPrice, units: r.units, months: r.months, signedUp: r.signedUp, notes: r.notes })) });
+  items: engPlanGroups(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, pricingModel: r.pricingModel, mandatory: r.mandatory, prerequisites: r.prerequisites, unitPrice: r.unitPrice, units: r.units,
+    months: r.pricingModel === 'per_head_month' ? r.months ?? 1 : null, signedUp: r.signedUp, notes: r.notes })) });
 
 async function engSavePlan() {
   const out = await engPost({ action: 'plan', plan: engPlanBody() }, 'Saved');

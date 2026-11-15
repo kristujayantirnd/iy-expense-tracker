@@ -41,7 +41,7 @@ function toast(msg, ok = true) {
 function busy(msg = 'Saving…') {
   const el = $id('iyBusy');
   busy.n = (busy.n || 0) + 1;
-  el.querySelector('span').textContent = msg;
+  el.querySelector('.iy-busy-text').textContent = msg;
   el.classList.remove('d-none');
   document.body.style.cursor = 'progress';
   let done = false;
