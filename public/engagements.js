@@ -186,19 +186,34 @@ const engSplitPcts = (it) => {
   return Object.fromEntries(ids.map((id) => [id, set ? Number(it.employeeSplit[id]) || 0 : Math.round((100 / ids.length) * 100) / 100]));
 };
 const engSplitText = (it) => { const p = engSplitPcts(it); const set = Object.keys(it.employeeSplit || {}).length; return (set ? '' : 'Equal: ') + Object.entries(p).map(([id, v]) => `${esc(engEmployee(Number(id)) || '?')} ${v}%`).join(', '); };
-let engSplitKey = null;
-function engOpenSplit(key) {
+let engSplitKey = null, engSplitScope = 'ps';
+function engOpenSplit(key, scope = 'ps') {
   engSplitKey = key;
-  const it = E.product.items.find((i) => i.key === key);
+  engSplitScope = scope;
+  const it = scope === 'plan' ? engPlanTeam(E.plan.items[key]) : E.product.items.find((i) => i.key === key);
+  $id('splitItem').textContent = scope === 'plan' ? `${engItem(E.plan.items[key].itemId).name} (this plan only)` : it.name || 'this list item';
+  $id('splitPick').classList.toggle('d-none', scope !== 'plan');
+  if (scope === 'plan') {
+    $id('splitPick').innerHTML = `<label class="form-label small fw-semibold mb-1">Employees for this row</label>${engMulti('plan-team', E.data.employees.map((u) => ({ value: String(u.id), label: u.name })), it.employeeIds, 'engSplitTeam')}`;
+  }
+  engSplitRows(it);
+  modal('splitModal').show();
+}
+// The plan row's team in the dialog's terms (strings); its own if set, else the list item's.
+function engPlanTeam(r) {
+  const own = Array.isArray(r.employeeIds);
+  const m = engItem(r.itemId);
+  return { employeeIds: (own ? r.employeeIds : m.employeeIds).map(String), employeeSplit: { ...((own ? r.employeeSplit : m.employeeSplit) || {}) } };
+}
+function engSplitTeam(_key, values) { engSplitRows({ employeeIds: values, employeeSplit: {} }); }
+function engSplitRows(it) {
   const pcts = engSplitPcts(it);
-  $id('splitItem').textContent = it.name || 'this list item';
-  $id('splitRows').innerHTML = it.employeeIds.map((id) => `<div class="d-flex align-items-center gap-3 border rounded-3 p-2">
+  $id('splitRows').innerHTML = !it.employeeIds.length ? '<div class="small text-muted">No employees: this revenue counts as "No employee tagged".</div>' : it.employeeIds.map((id) => `<div class="d-flex align-items-center gap-3 border rounded-3 p-2">
       <span class="small fw-semibold text-truncate flex-shrink-0" style="width:32%">${esc(engEmployee(Number(id)) || '?')}</span>
       <input type="range" min="0" max="100" step="5" value="${pcts[id]}" class="form-range flex-fill" style="min-width:4rem" aria-label="${esc(engEmployee(Number(id)) || '')} share" oninput="this.nextElementSibling.querySelector('input').value = this.value; engSplitTotal()">
       <div class="input-group input-group-sm flex-nowrap flex-shrink-0" style="width:7.5rem"><input type="number" min="0" max="100" step="0.01" class="form-control text-end px-2" style="min-width:4.5rem;color:#1a1a1a" data-emp="${id}" value="${pcts[id]}" aria-label="${esc(engEmployee(Number(id)) || '')} percent" oninput="this.closest('.d-flex').querySelector('input[type=range]').value = this.value; engSplitTotal()"><span class="input-group-text">%</span></div>
     </div>`).join('');
   engSplitTotal();
-  modal('splitModal').show();
 }
 function engSplitTotal() {
   const total = Math.round([...$id('splitRows').querySelectorAll('input[type=number]')].reduce((s, x) => s + (Number(x.value) || 0), 0) * 100) / 100;
@@ -214,12 +229,30 @@ function engSplitEqual() {
   engSplitTotal();
 }
 function engSaveSplit() {
-  if (engSplitTotal() !== 100) return toast('The shares must add up to 100%', false);
+  const boxes = [...$id('splitRows').querySelectorAll('input[type=number]')];
+  if (boxes.length && engSplitTotal() !== 100) return toast('The shares must add up to 100%', false);
+  const split = boxes.length > 1 ? Object.fromEntries(boxes.map((b) => [b.dataset.emp, Number(b.value) || 0])) : {};
+  if (engSplitScope === 'plan') {
+    const r = E.plan.items[engSplitKey];
+    r.employeeIds = boxes.map((b) => Number(b.dataset.emp));
+    r.employeeSplit = split;
+    E.plan.dirty = true;
+    modal('splitModal').hide();
+    engRenderPlan();
+    return toast('Set for this plan. Save the plan to keep it.');
+  }
   const it = E.product.items.find((i) => i.key === engSplitKey);
-  it.employeeSplit = Object.fromEntries([...$id('splitRows').querySelectorAll('input[type=number]')].map((b) => [b.dataset.emp, Number(b.value) || 0]));
+  it.employeeSplit = split;
   modal('splitModal').hide();
   engRenderPsItems();
   toast('Split set. Save the product / service to keep it.');
+}
+// Back to the list item's employees and split.
+function engPlanTeamReset(i) { E.plan.items[i].employeeIds = null; E.plan.items[i].employeeSplit = null; E.plan.dirty = true; engRenderPlan(); }
+function engPlanTeamText(r) {
+  const t = engPlanTeam(r);
+  if (!t.employeeIds.length) return '<span class="text-muted">No employee</span>';
+  return t.employeeIds.length === 1 ? esc(engEmployee(Number(t.employeeIds[0])) || '?') : engSplitText(t);
 }
 
 function engRemovePsItem(n) {
@@ -711,7 +744,11 @@ function engRenderPlan() {
           const perMonth = r.pricingModel === 'per_head_month';
           return `<tr ${ro ? '' : engDragAttrs('row', i)}>
             <td class="ps-3">${ro ? '' : engGrip()}${esc(m.name)}${r.mandatory ? ' <span class="badge badge-soft badge-soft-pending ms-1" style="font-size:10px">Mandatory</span>' : ''}
-              ${needs.length ? `<div class="text-muted" style="font-size:11px">Needs: ${needs.map(esc).join(', ')}</div>` : ''}</td>
+              ${needs.length ? `<div class="text-muted" style="font-size:11px">Needs: ${needs.map(esc).join(', ')}</div>` : ''}
+              <div style="font-size:11px" class="d-flex align-items-center gap-1 flex-wrap"><i class="fa-solid fa-user-group text-muted"></i><span>${engPlanTeamText(r)}</span>
+                ${Array.isArray(r.employeeIds) ? '<span class="badge bg-info-subtle text-info-emphasis border" style="font-size:9px">this plan</span>' : ''}
+                ${ro ? '' : `<button type="button" class="btn btn-link btn-sm p-0" style="font-size:11px" onclick="engOpenSplit(${i}, 'plan')" title="Change the employees or their revenue split for this plan" aria-label="Employees and split for ${esc(m.name)}"><i class="fa-solid fa-circle-info"></i> edit</button>`}
+                ${!ro && Array.isArray(r.employeeIds) ? `<button type="button" class="btn btn-link btn-sm p-0 text-muted" style="font-size:11px" onclick="engPlanTeamReset(${i})" title="Use the employees and split from Products & Services">reset</button>` : ''}</div></td>
             <td>${E.data.pricing[r.pricingModel]}</td>
             <td>${perMonth ? `<div class="d-flex flex-column gap-1">
                 <div class="input-group input-group-sm flex-nowrap" style="min-width:6.5rem"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" style="min-width:3.5rem" value="${r.units}" ${ro ? 'disabled' : ''} aria-label="Head count, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="Head count">hd</span></div>
@@ -831,7 +868,8 @@ async function engGenerate() {
 
 const engPlanBody = () => ({ id: E.plan.id, name: E.plan.name, notes: E.plan.notes, schedule: E.plan.schedule.filter((x) => !x.invoiceId).map((x) => ({ amount: x.amount, invoiceDate: x.invoiceDate, dueDate: x.dueDate, particulars: x.particulars, poNumber: x.poNumber })),
   items: engPlanGroups(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, pricingModel: r.pricingModel, mandatory: r.mandatory, prerequisites: r.prerequisites, unitPrice: r.unitPrice, units: r.units,
-    months: r.pricingModel === 'per_head_month' ? r.months ?? 1 : null, signedUp: r.signedUp, notes: r.notes })) });
+    months: r.pricingModel === 'per_head_month' ? r.months ?? 1 : null, signedUp: r.signedUp, notes: r.notes,
+    ...(Array.isArray(r.employeeIds) ? { employeeIds: r.employeeIds, employeeSplit: r.employeeSplit || {} } : {}) })) });
 
 async function engSavePlan() {
   const out = await engPost({ action: 'plan', plan: engPlanBody() }, 'Saved');

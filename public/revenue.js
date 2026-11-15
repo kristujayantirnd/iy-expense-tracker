@@ -73,11 +73,14 @@ function rvCompute() {
       const pname = it ? it.product : 'Removed item';
       add(groups.product, 'p' + (it ? it.productId : 0), pname, st, a.amount);
       add(groups.item, a.itemId, it ? it.name : 'Removed item', st, a.amount, { productKey: 'p' + (it ? it.productId : 0) });
-      const emps = it ? it.employeeIds : [];
+      // the plan row's own employees and split if it has them, else the list item's
+      const row = (E.data.plans.find((p) => p.id === a.planId)?.items || []).find((r) => r.itemId === a.itemId);
+      const own = row && Array.isArray(row.employeeIds);
+      const emps = own ? row.employeeIds : it ? it.employeeIds : [];
       if (!emps.length) add(groups.employee, '_untagged', 'No employee tagged', st, a.amount, { muted: true });
       else {
-        // the item's employee split (percent), else equal shares
-        const split = it.employeeSplit || {};
+        // percent split, else equal shares
+        const split = (own ? row.employeeSplit : it.employeeSplit) || {};
         const set = emps.length > 1 && emps.some((e) => Number(split[e]) > 0);
         for (const e of emps) add(groups.employee, 'e' + e, engEmployee(e) || 'Former employee', st, a.amount * (set ? (Number(split[e]) || 0) / 100 : 1 / emps.length));
       }
@@ -169,7 +172,7 @@ function rvRender() {
     <div class="row g-3">
       <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-3">By product / service</h2>${rvBars(c.product, 'product')}${rvTable(c.product, 'Product / service', true, c.item)}</div></div>
       <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-1">By employee</h2>
-        <div class="small text-muted mb-2">From the employees mapped to each list item, by its employee split (equal shares if none is set).</div>${rvBars(c.employee, 'employee')}${rvTable(c.employee, 'Employee')}</div></div>
+        <div class="small text-muted mb-2">From each plan row's employees and split (set in the plan, else in Products & Services; equal shares if no split).</div>${rvBars(c.employee, 'employee')}${rvTable(c.employee, 'Employee')}</div></div>
       <div class="col-12"><div class="filter-card p-3"><h2 class="h6 fw-bold mb-3">By month (invoice date)</h2>${rvColumns(c.month)}${rvTable(c.month, 'Month')}</div></div>
     </div>`;
 }

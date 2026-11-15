@@ -320,3 +320,7 @@ alter table plan_invoices add column if not exists po_number text not null defau
 
 -- Revenue split between the employees mapped to a list item ({ "<user id>": percent }, adding up to 100; empty = equal shares).
 alter table ps_items add column if not exists employee_split jsonb not null default '{}';
+
+-- A plan row may set its own employees and revenue split (null = follow the list item's in Products & Services).
+alter table client_plan_items add column if not exists employee_ids int[];
+alter table client_plan_items add column if not exists employee_split jsonb;

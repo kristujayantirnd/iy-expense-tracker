@@ -52,7 +52,8 @@ async function readAll(db) {
        from client_plans p join clients c on c.id = p.client_id left join users f on f.id = p.frozen_by
        order by p.sort, p.created_at desc`,
     db`select plan_id as "planId", item_id as "itemId", pricing_model as "pricingModel", mandatory, prerequisites,
-              unit_price::float8 as "unitPrice", units::float8 as units, months::float8 as months, signed_up::float8 as "signedUp", notes
+              unit_price::float8 as "unitPrice", units::float8 as units, months::float8 as months, signed_up::float8 as "signedUp", notes,
+              employee_ids as "employeeIds", employee_split as "employeeSplit"
        from client_plan_items order by plan_id, sort, id`,
     db`select id, name from clients order by lower(name)`,
     db`select id, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where active order by 2`,
@@ -77,6 +78,13 @@ function employeesOf(v, staff) {
   const ids = [...new Set((Array.isArray(v) ? v : []).map(Number))];
   if (ids.some((x) => !staff.has(x))) throw new Bad('An employee picked for a list item no longer exists, please reload');
   return ids;
+}
+
+// A plan row's own employees and split (null / null = follow the list item in Products & Services).
+function planTeam(it, staff) {
+  if (!Array.isArray(it.employeeIds)) return { employeeIds: null, employeeSplit: null };
+  const employeeIds = employeesOf(it.employeeIds, staff);
+  return { employeeIds, employeeSplit: splitOf(it.employeeSplit, employeeIds, 'A plan row') };
 }
 
 // Employee-wise revenue split of a list item: percents for its mapped employees adding up to 100, or {} (equal shares).
@@ -291,6 +299,7 @@ async function savePlan(db, me, body) {
   const masterIds = new Set(master.map((m) => m.item_id));
   const attrs = (itemId) => own.find((r) => r.item_id === itemId) || card.find((r) => r.item_id === itemId) || master.find((r) => r.item_id === itemId);
   const seen = new Set();
+  const staff = new Set((await db`select id from users`).map((u) => u.id));
   const items = rows.map((it) => {
     const itemId = intId(it?.itemId, 'list item');
     const known = attrs(itemId);
@@ -308,7 +317,7 @@ async function savePlan(db, me, body) {
     const months = a.pricing_model === 'per_head_month' ? (it.months === '' || it.months == null ? 1 : num(it.months, 1e4, 'Months')) : null;
     const signedUp = it.signedUp === '' || it.signedUp == null ? null : num(it.signedUp, 1e10, 'Signed up');
     return { itemId, pricingModel: a.pricing_model, mandatory: a.mandatory, prerequisites: a.prerequisites, unitPrice: num(it.unitPrice, 1e10, 'Unit price'), units, months,
-      signedUp, notes: text(it.notes, 1000, false, 'row notes') };
+      signedUp, notes: text(it.notes, 1000, false, 'row notes'), ...planTeam(it, staff) };
   });
   const problems = await planProblems(db, plan.rate_card_id, items);
   if (problems.length) throw new Bad(`Can't save yet: ${problems.join('; ')}.`);
@@ -326,8 +335,9 @@ async function savePlan(db, me, body) {
                                         values (${id}, ${schedule.start + n}, ${x.amount}, ${x.invoiceDate}, ${x.dueDate}, ${x.particulars}, ${x.poNumber})`)] : []),
     db`update client_plans set name = ${text(p.name, 150, true, 'plan name')}, notes = ${text(p.notes, 2000, false, 'notes')}, updated_by = ${me.id}, updated_at = now() where id = ${id}`,
     db`delete from client_plan_items where plan_id = ${id}`,
-    ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, signed_up, notes, sort)
-                               values (${id}, ${it.itemId}, ${it.pricingModel}, ${it.mandatory}, ${it.prerequisites}::int[], ${it.unitPrice}, ${it.units}, ${it.months}, ${it.signedUp}, ${it.notes}, ${n})`),
+    ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, signed_up, notes, employee_ids, employee_split, sort)
+                               values (${id}, ${it.itemId}, ${it.pricingModel}, ${it.mandatory}, ${it.prerequisites}::int[], ${it.unitPrice}, ${it.units}, ${it.months}, ${it.signedUp}, ${it.notes},
+                                       ${it.employeeIds}::int[], ${it.employeeSplit ? JSON.stringify(it.employeeSplit) : null}::jsonb, ${n})`),
   ]);
   return { notice: plan.frozenTotal != null ? 'Saved. The signed-up total still matches the frozen total.' : 'Plan saved', id };
 }
