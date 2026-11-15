@@ -168,7 +168,7 @@ function rvRender() {
       ${tile('Upcoming', c.totals.upcoming, 'upcoming', 'Not invoiced to the client yet')}
     </div>
     <div class="d-flex gap-3 small mb-2 flex-wrap" aria-label="Legend">${RV_STATUS.map(([k, n]) => `<span><span class="rv-sw rv-${k}"></span>${n}</span>`).join('')}
-      <span class="text-muted ms-auto">All amounts exclude GST. Hover a bar for the split.</span></div>
+      <span class="text-muted ms-auto">Service invoices only (reimbursements are left out). All amounts exclude GST. Hover a bar for the split.</span></div>
     <div class="row g-3">
       <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-3">By product / service</h2>${rvBars(c.product, 'product')}${rvTable(c.product, 'Product / service', true, c.item)}</div></div>
       <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-1">By employee</h2>

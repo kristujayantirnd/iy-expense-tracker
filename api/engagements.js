@@ -402,11 +402,14 @@ async function generateInvoices(db, me, body) {
     + (sheetErrors ? ` ${sheetErrors} sheet cop${sheetErrors > 1 ? 'ies' : 'y'} failed; use Retry sheet sync in Manage Invoices.` : '') };
 }
 
-// Revenue dashboard: every invoice (dashboard status and amount without GST) and how plan invoices split across items.
+// Revenue dashboard: every service invoice (dashboard status, amount without GST) and how plan invoices split across items.
 async function revenue(db) {
   const [invoices, allocations] = await db.transaction([
-    db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as date, status, amount::float8 as amount from receivable_invoices`,
-    db`select invoice_id as "invoiceId", item_id as "itemId", plan_id as "planId", amount::float8 as amount from invoice_allocations`,
+    // service invoices only: reimbursements are the client paying back expenses, not revenue
+    db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as date, status, amount::float8 as amount
+       from receivable_invoices where invoice_type !~* 'reimburs'`,
+    db`select a.invoice_id as "invoiceId", a.item_id as "itemId", a.plan_id as "planId", a.amount::float8 as amount
+       from invoice_allocations a join receivable_invoices r on r.id = a.invoice_id where r.invoice_type !~* 'reimburs'`,
   ]);
   return { invoices, allocations };
 }
