@@ -234,3 +234,15 @@ create table if not exists client_plan_items (
   sort int not null default 0,
   unique (plan_id, item_id)
 );
+
+-- Products & Services: notes and (optional) employees per list item; Per Head-Monthly pricing
+-- (a plan row then takes a head count and a number of months: actual = unit price x heads x months).
+alter table ps_items add column if not exists notes text not null default '';
+alter table ps_items add column if not exists employee_ids int[] not null default '{}';
+alter table ps_items drop constraint if exists ps_items_pricing_model_check;
+alter table ps_items add constraint ps_items_pricing_model_check
+  check (pricing_model in ('per_head', 'per_head_month', 'per_batch', 'per_hour', 'per_day', 'per_month', 'fixed'));
+alter table client_plan_items add column if not exists months numeric;
+alter table client_plan_items add column if not exists notes text not null default '';
+-- Engagement plans are listed in the order they are dragged to.
+alter table client_plans add column if not exists sort int not null default 0;

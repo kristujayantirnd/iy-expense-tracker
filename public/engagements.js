@@ -2,12 +2,14 @@
 // Admin and Finance Admin edit; Management sees the same screens read-only.
 // Uses $id, toast and modal from invoice-automator.js, and esc / formatINR from the page.
 const E = { data: null, loading: null, product: null, card: null, plan: null, newKey: 0 };
-const UNIT_LABEL = { per_head: 'Head count', per_batch: 'Batches', per_hour: 'Hours', per_day: 'Days', per_month: 'Months', fixed: 'Fixed' };
+const UNIT_SHORT = { per_head: 'hd', per_head_month: 'hd×mo', per_batch: 'bt', per_hour: 'hr', per_day: 'day', per_month: 'mo', fixed: 'fix' };
+const UNIT_LABEL = { per_head: 'Head count', per_head_month: 'Heads × months', per_batch: 'Batches', per_hour: 'Hours', per_day: 'Days', per_month: 'Months', fixed: 'Fixed' };
 const engR2 = (n) => Math.round(n * 100) / 100;
 const engMoney = (n) => formatINR(Number(n) || 0);
 const engPct = (n) => (n === null || !Number.isFinite(n) ? '–' : `${n > 0 ? '+' : ''}${n.toFixed(1)}%`);
 const engItem = (id) => E.itemMap.get(id);
 const engCanEdit = () => E.data && E.data.canEdit;
+const engEmployee = (id) => (E.data.employees.find((u) => u.id === id) || {}).name;
 
 function startEngagements() {
   document.querySelectorAll('.eng-only').forEach((el) => el.classList.remove('d-none'));
@@ -94,7 +96,7 @@ const engPricingSelect = (value, onchange, disabled = false, label = 'Pricing mo
 function engRenderProducts() {
   if (!E.data) return;
   const words = $id('psSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = E.data.products.filter((p) => { const hay = [p.name, p.description, ...p.items.map((i) => i.name)].join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); });
+  const list = E.data.products.filter((p) => { const hay = [p.name, p.description, ...p.items.map((i) => `${i.name} ${i.notes} ${i.employeeIds.map(engEmployee).join(' ')}`)].join(' ').toLowerCase(); return words.every((w) => hay.includes(w)); });
   if (!list.length) {
     $id('psList').innerHTML = `<div class="text-muted text-center py-4">${E.data.products.length ? 'Nothing matches the search.' : 'No products or services yet.' + (engCanEdit() ? ' Add the first one.' : '')}</div>`;
     return;
@@ -106,17 +108,19 @@ function engRenderProducts() {
         ${engCanEdit() ? `<button class="btn btn-light border btn-sm" onclick="engOpenProduct(${p.id})"><i class="fa-solid fa-pen"></i> Edit</button>` : ''}
       </div>
       <div class="table-responsive"><table class="table table-sm align-middle small mb-0">
-        <thead class="bg-light"><tr><th class="ps-3">List item</th><th>Pricing model</th><th>Mandatory</th><th>Prerequisites</th></tr></thead>
+        <thead class="bg-light"><tr><th class="ps-3">List item</th><th>Pricing model</th><th>Mandatory</th><th>Prerequisites</th><th>Employees</th><th>Notes</th></tr></thead>
         <tbody>${p.items.map((it) => `<tr><td class="ps-3">${esc(it.name)}</td><td>${E.data.pricing[it.pricingModel]}</td>
           <td>${it.mandatory ? '<span class="badge badge-soft badge-soft-pending">Y</span>' : '<span class="text-muted">N</span>'}</td>
-          <td>${it.prerequisites.map((x) => esc(engItem(x)?.name || '?')).join(', ') || '<span class="text-muted">–</span>'}</td></tr>`).join('')
-          || '<tr><td colspan="4" class="ps-3 text-muted">No list items yet.</td></tr>'}</tbody></table></div>
+          <td>${it.prerequisites.map((x) => esc(engItem(x)?.name || '?')).join(', ') || '<span class="text-muted">–</span>'}</td>
+          <td>${it.employeeIds.map((x) => esc(engEmployee(x) || '?')).join(', ') || '<span class="text-muted">–</span>'}</td>
+          <td style="white-space:pre-wrap;min-width:10rem">${esc(it.notes) || '<span class="text-muted">–</span>'}</td></tr>`).join('')
+          || '<tr><td colspan="6" class="ps-3 text-muted">No list items yet.</td></tr>'}</tbody></table></div>
     </div>`).join('');
 }
 
 function engOpenProduct(id) {
   const p = id ? E.data.products.find((x) => x.id === id) : null;
-  E.product = { id: p ? p.id : null, items: (p ? p.items : []).map((it) => ({ key: String(it.id), id: it.id, name: it.name, pricingModel: it.pricingModel, mandatory: it.mandatory, prerequisites: it.prerequisites.map(String) })) };
+  E.product = { id: p ? p.id : null, items: (p ? p.items : []).map((it) => ({ key: String(it.id), id: it.id, name: it.name, pricingModel: it.pricingModel, mandatory: it.mandatory, prerequisites: it.prerequisites.map(String), notes: it.notes, employeeIds: it.employeeIds.map(String) })) };
   if (!p) engAddPsItem(false);
   $id('psTitle').textContent = p ? `Edit ${p.name}` : 'Add product / service';
   $id('psName').value = p ? p.name : '';
@@ -127,7 +131,7 @@ function engOpenProduct(id) {
 }
 
 function engAddPsItem(render = true) {
-  E.product.items.push({ key: `n${++E.newKey}`, id: null, name: '', pricingModel: 'per_head', mandatory: false, prerequisites: [] });
+  E.product.items.push({ key: `n${++E.newKey}`, id: null, name: '', pricingModel: 'per_head', mandatory: false, prerequisites: [], notes: '', employeeIds: [] });
   if (render) { engRenderPsItems(); $id('psItems').querySelector('tbody tr:last-child input')?.focus(); }
 }
 
@@ -141,18 +145,21 @@ function engPsPrereqOptions(key) {
 
 function engRenderPsItems() {
   const rows = E.product.items;
-  $id('psItems').innerHTML = `<thead class="bg-light"><tr><th style="min-width:14rem">List item</th><th style="width:11rem">Pricing model</th><th style="width:6rem">Mandatory</th><th style="min-width:14rem">Prerequisites</th><th style="width:3rem"></th></tr></thead><tbody>`
+  $id('psItems').innerHTML = `<thead class="bg-light"><tr><th style="min-width:14rem">List item</th><th style="width:11rem">Pricing model</th><th style="width:6rem">Mandatory</th><th style="min-width:13rem">Prerequisites</th><th style="min-width:12rem">Employees (optional)</th><th style="min-width:14rem">Notes</th><th style="width:3rem"></th></tr></thead><tbody>`
     + rows.map((it, n) => `<tr>
       <td><input class="form-control form-control-sm" value="${esc(it.name)}" maxlength="200" required aria-label="List item ${n + 1} name" oninput="E.product.items[${n}].name = this.value" onchange="engRenderPsItems()"></td>
       <td>${engPricingSelect(it.pricingModel, `E.product.items[${n}].pricingModel = this.value`, false, `Pricing model, item ${n + 1}`)}</td>
       <td><select class="form-select form-select-sm" aria-label="Mandatory, item ${n + 1}" onchange="E.product.items[${n}].mandatory = this.value === 'Y'">
         <option ${it.mandatory ? '' : 'selected'}>N</option><option ${it.mandatory ? 'selected' : ''}>Y</option></select></td>
       <td>${engMulti(it.key, engPsPrereqOptions(it.key), it.prerequisites, 'engPsPrereq')}</td>
+      <td>${engMulti(it.key, E.data.employees.map((u) => ({ value: String(u.id), label: u.name })), it.employeeIds, 'engPsEmployees')}</td>
+      <td><textarea class="form-control form-control-sm" rows="1" maxlength="1000" aria-label="Notes, item ${n + 1}" oninput="E.product.items[${n}].notes = this.value">${esc(it.notes)}</textarea></td>
       <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="engRemovePsItem(${n})" aria-label="Remove list item ${n + 1}"><i class="fa-solid fa-xmark"></i></button></td></tr>`).join('')
-    + (rows.length ? '' : '<tr><td colspan="5" class="text-muted">No list items. Add one.</td></tr>') + '</tbody>';
+    + (rows.length ? '' : '<tr><td colspan="7" class="text-muted">No list items. Add one.</td></tr>') + '</tbody>';
 }
 
 function engPsPrereq(key, values) { E.product.items.find((i) => i.key === key).prerequisites = values; }
+function engPsEmployees(key, values) { E.product.items.find((i) => i.key === key).employeeIds = values; }
 
 function engRemovePsItem(n) {
   const [gone] = E.product.items.splice(n, 1);
@@ -296,7 +303,8 @@ async function engDeleteCard(id) {
 
 /* ---------- Engagement plans ---------- */
 
-const engActual = (r) => engR2((Number(r.unitPrice) || 0) * (Number(r.units) || 0));
+// Per Head-Monthly: unit price x heads x months.
+const engActual = (r) => engR2((Number(r.unitPrice) || 0) * (Number(r.units) || 0) * (r.pricingModel === 'per_head_month' ? Number(r.months ?? 1) || 0 : 1));
 const engSigned = (r) => (r.signedUp === null || r.signedUp === '' || r.signedUp === undefined ? engActual(r) : engR2(Number(r.signedUp) || 0));
 const engVar = (actual, signed) => (actual ? ((signed - actual) / actual) * 100 : signed ? null : 0);
 const engTotals = (rows) => { const actual = engR2(rows.reduce((s, r) => s + engActual(r), 0)); const signed = engR2(rows.reduce((s, r) => s + engSigned(r), 0)); return { actual, signed, variation: engVar(actual, signed) }; };
@@ -308,11 +316,13 @@ function engRenderPlans() {
   const words = $id('cpSearch').value.toLowerCase().split(/\s+/).filter(Boolean);
   const plans = E.data.plans.filter((p) => { const hay = `${p.client} ${p.name}`.toLowerCase(); return words.every((w) => hay.includes(w)); });
   if (!plans.length) { $id('cpTable').innerHTML = `<tr><td class="text-muted text-center py-4">${E.data.plans.length ? 'Nothing matches the search.' : 'No engagement plans yet.' + (engCanEdit() ? ' Use Apply rate card to client.' : '')}</td></tr>`; return; }
+  const drag = engCanEdit() && !words.length; // the order is the whole list's, so no dragging while searching
   $id('cpTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Plan</th><th>From rate card</th><th class="text-end">Actual price</th><th class="text-end">Signed up</th><th class="text-end">Variation</th><th>Status</th><th></th></tr></thead><tbody>`
     + plans.map((p) => {
       const t = engTotals(p.items);
       const card = E.data.rateCards.find((c) => c.id === p.rateCardId);
-      return `<tr><td style="white-space:normal;min-width:12rem">${esc(p.client)}</td><td class="fw-semibold">${esc(p.name)}</td><td>${card ? esc(card.name) : '<span class="text-muted">–</span>'}</td>
+      return `<tr ${drag ? `ondragstart="engDragStart(event, 'plan', ${p.id})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, 'plan')" ondrop="engDropPlan(event, ${p.id})"` : ''}>
+        <td style="white-space:normal;min-width:12rem">${drag ? engGrip() : ''}${esc(p.client)}</td><td class="fw-semibold">${esc(p.name)}</td><td>${card ? esc(card.name) : '<span class="text-muted">–</span>'}</td>
         <td class="text-end">${engMoney(t.actual)}</td><td class="text-end fw-semibold">${engMoney(t.signed)}</td><td class="text-end ${t.variation < 0 ? 'text-danger' : t.variation > 0 ? 'text-success' : ''}">${engPct(t.variation)}</td>
         <td>${p.frozenTotal != null ? `<span class="badge badge-soft badge-soft-upcoming" title="Frozen by ${esc(p.frozenBy || '')} on ${esc(p.frozenOn || '')}"><i class="fa-solid fa-lock me-1"></i>Frozen</span>` : '<span class="badge badge-soft badge-soft-pending">Draft</span>'}</td>
         <td class="text-end text-nowrap"><button class="btn btn-light border btn-sm" onclick="engOpenPlan(${p.id})"><i class="fa-solid fa-table-list"></i> Cost structure</button>
@@ -377,7 +387,7 @@ function engPlanRow(itemId) {
   const fromCard = card && card.items.find((r) => r.itemId === itemId);
   const m = engItem(itemId);
   const src = fromCard || m;
-  return { itemId, pricingModel: src.pricingModel, mandatory: src.mandatory, prerequisites: [...src.prerequisites], unitPrice: fromCard ? fromCard.unitPrice : 0, units: 1, signedUp: null };
+  return { itemId, pricingModel: src.pricingModel, mandatory: src.mandatory, prerequisites: [...src.prerequisites], unitPrice: fromCard ? fromCard.unitPrice : 0, units: 1, months: src.pricingModel === 'per_head_month' ? 1 : null, signedUp: null, notes: '' };
 }
 
 function engPlanAddProduct() {
@@ -400,6 +410,7 @@ function engPlanRemove(i) { E.plan.items.splice(i, 1); E.plan.dirty = true; engR
 function engPlanSet(i, field, value) {
   const r = E.plan.items[i];
   if (field === 'signedUp') r.signedUp = value === '' ? null : Number(value);
+  else if (field === 'notes') r.notes = value;
   else r[field] = value === '' ? 0 : Number(value);
   E.plan.dirty = true;
   engPlanFigures();
@@ -418,7 +429,7 @@ function engPlanFigures() {
     if (inp && document.activeElement !== inp && r.signedUp === null) inp.value = a || '';
     if (inp) inp.classList.toggle('border-warning', r.signedUp !== null && engR2(r.signedUp) !== a);
   });
-  for (const g of engGroupRows(E.plan.items)) {
+  for (const g of engPlanGroups(E.plan.items)) {
     const t = engTotals(g.items);
     const el = document.getElementById(`cp-sub-${g.product.id}`);
     if (el) el.innerHTML = `${engMoney(t.actual)} → <b>${engMoney(t.signed)}</b> <span class="${t.variation < 0 ? 'text-danger' : t.variation > 0 ? 'text-success' : 'text-muted'}">(${engPct(t.variation)})</span>`;
@@ -451,12 +462,73 @@ function engBalance() {
   engRenderPlan();
 }
 
+// A plan's rows grouped by product in the plan's own order (groups by first appearance), so rows can be dragged.
+function engPlanGroups(rows) {
+  const groups = [];
+  for (const r of rows) {
+    const pid = engItem(r.itemId).productId;
+    let g = groups.find((x) => x.product.id === pid);
+    if (!g) groups.push((g = { product: E.data.products.find((p) => p.id === pid), items: [] }));
+    g.items.push(r);
+  }
+  return groups;
+}
+
+/* ---------- drag to reorder (plans in the list, rows in a plan) ---------- */
+// Only the grip handle starts a drag, so text in the row's inputs can still be selected.
+let engDrag = null;
+function engGrip() {
+  return `<span class="text-muted me-2" style="cursor:grab" title="Drag to reorder" aria-hidden="true"
+    onmousedown="this.closest('tr').draggable = true" ontouchstart="this.closest('tr').draggable = true"><i class="fa-solid fa-grip-vertical"></i></span>`;
+}
+function engDragStart(ev, kind, key) {
+  engDrag = { kind, key };
+  if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', String(key)); }
+  ev.currentTarget.classList.add('opacity-50');
+}
+function engDragEnd(ev) { ev.currentTarget.draggable = false; ev.currentTarget.classList.remove('opacity-50'); engDrag = null; }
+function engDragOver(ev, kind) { if (engDrag && engDrag.kind === kind) { ev.preventDefault(); if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'; } }
+const engMove = (list, from, to) => { const [x] = list.splice(from, 1); list.splice(to, 0, x); };
+
+// Plan rows move within their own product.
+function engDropRow(ev, to) {
+  ev.preventDefault();
+  if (!engDrag || engDrag.kind !== 'row') return;
+  const from = engDrag.key;
+  engDrag = null;
+  engPlanMoveRow(from, to);
+}
+function engPlanMoveRow(from, to) {
+  const rows = E.plan.items;
+  if (from === to || engItem(rows[from].itemId).productId !== engItem(rows[to].itemId).productId) return;
+  engMove(rows, from, to);
+  E.plan.dirty = true;
+  engRenderPlan();
+}
+
+// Plans in the list: dropped onto another plan's row, saved straight away.
+function engDropPlan(ev, toId) {
+  ev.preventDefault();
+  if (!engDrag || engDrag.kind !== 'plan') return;
+  const fromId = engDrag.key;
+  engDrag = null;
+  engMovePlan(fromId, toId);
+}
+async function engMovePlan(fromId, toId) {
+  const plans = E.data.plans;
+  const from = plans.findIndex((p) => p.id === fromId), to = plans.findIndex((p) => p.id === toId);
+  if (from < 0 || to < 0 || from === to) return;
+  engMove(plans, from, to);
+  engRenderPlans();
+  await engPost({ action: 'reorderPlans', ids: plans.map((p) => p.id) }, 'Order saved');
+}
+
 function engRenderPlan() {
   const P = E.plan;
   const ro = !engCanEdit();
   const frozen = P.frozenTotal != null;
   const inPlan = new Set(P.items.map((r) => r.itemId));
-  const groups = engGroupRows(P.items);
+  const groups = engPlanGroups(P.items);
   const card = E.data.rateCards.find((c) => c.id === P.rateCardId);
   const addable = E.data.products.filter((p) => p.items.some((i) => !inPlan.has(i.id)));
   $id('cpEditor').innerHTML = `
@@ -475,6 +547,7 @@ function engRenderPlan() {
     </div>
     ${frozen ? `<div class="alert alert-info small py-2 mb-3"><i class="fa-solid fa-lock me-1"></i>Frozen at <b>${engMoney(P.frozenTotal)}</b>${P.frozenBy ? ` by ${esc(P.frozenBy)}` : ''}${P.frozenOn ? ` on ${esc(P.frozenOn)}` : ''}. Items can still change, but the signed-up total must add up to this amount to save. <div id="cp-frozen" class="mt-1"></div></div>` : ''}
     <div id="cp-problems"></div>
+    ${ro ? '' : '<div class="small text-muted mb-2"><i class="fa-solid fa-grip-vertical me-1"></i>Drag a row by its handle to reorder it within its product / service.</div>'}
     ${ro ? '' : `<div class="d-flex gap-2 align-items-end mb-3 flex-wrap">
       <div><label class="form-label small fw-semibold" for="cpAddProduct">Add a product / service from the master</label>
         <select id="cpAddProduct" class="form-select form-select-sm" style="min-width:18rem">${addable.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('') || '<option value="">Everything in the master is in this plan</option>'}</select></div>
@@ -482,10 +555,10 @@ function engRenderPlan() {
     </div>`}
     <div class="table-responsive"><table class="table align-middle small mb-0">
       <thead class="bg-light"><tr><th style="min-width:13rem">List item</th><th>Pricing model</th><th style="width:8rem" class="text-end">Units</th><th style="width:9rem" class="text-end">Unit price (₹)</th>
-        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end">Variation</th><th style="width:3rem"></th></tr></thead>
+        <th style="width:9rem" class="text-end">Actual price</th><th style="width:10rem" class="text-end">Signed up (₹)</th><th style="width:6rem" class="text-end">Variation</th><th style="min-width:12rem">Notes</th><th style="width:3rem"></th></tr></thead>
       <tbody>${groups.map((g) => {
         const missing = g.product.items.filter((m) => !inPlan.has(m.id));
-        return `<tr class="table-light"><td colspan="8"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+        return `<tr class="table-light"><td colspan="9"><div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
           <span><span class="fw-bold">${esc(g.product.name)}</span> <span class="small ms-2" id="cp-sub-${g.product.id}"></span></span>
           ${ro || !missing.length ? '' : `<select class="form-select form-select-sm" style="width:auto" aria-label="Add a list item of ${esc(g.product.name)}" onchange="engPlanAddItem(this)"><option value="">+ Add an item…</option>${missing.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join('')}</select>`}
         </div></td></tr>` + g.items.map((r) => {
@@ -493,26 +566,31 @@ function engRenderPlan() {
           const m = engItem(r.itemId);
           const fixed = r.pricingModel === 'fixed';
           const needs = r.prerequisites.map((x) => engItem(x)?.name).filter(Boolean);
-          return `<tr><td class="ps-3">${esc(m.name)}${r.mandatory ? ' <span class="badge badge-soft badge-soft-pending ms-1" style="font-size:10px">Mandatory</span>' : ''}
+          const perMonth = r.pricingModel === 'per_head_month';
+          return `<tr ${ro ? '' : `ondragstart="engDragStart(event, 'row', ${i})" ondragend="engDragEnd(event)" ondragover="engDragOver(event, 'row')" ondrop="engDropRow(event, ${i})"`}>
+            <td class="ps-3">${ro ? '' : engGrip()}${esc(m.name)}${r.mandatory ? ' <span class="badge badge-soft badge-soft-pending ms-1" style="font-size:10px">Mandatory</span>' : ''}
               ${needs.length ? `<div class="text-muted" style="font-size:11px">Needs: ${needs.map(esc).join(', ')}</div>` : ''}</td>
             <td>${E.data.pricing[r.pricingModel]}</td>
-            <td><div class="input-group input-group-sm"><input type="number" min="0" step="any" class="form-control text-end" value="${fixed ? 1 : r.units}" ${fixed || ro ? 'disabled' : ''} aria-label="${UNIT_LABEL[r.pricingModel]}, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"></div>
-              <div class="text-muted text-end" style="font-size:10px">${UNIT_LABEL[r.pricingModel]}</div></td>
+            <td>${perMonth ? `<div class="d-flex gap-1">
+                <div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${r.units}" ${ro ? 'disabled' : ''} aria-label="Head count, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="Head count">hd</span></div>
+                <div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${r.months ?? 1}" ${ro ? 'disabled' : ''} aria-label="Months, ${esc(m.name)}" oninput="engPlanSet(${i}, 'months', this.value)"><span class="input-group-text px-1 py-0 small" title="Months">mo</span></div></div>`
+              : `<div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="any" class="form-control form-control-sm text-end" value="${fixed ? 1 : r.units}" ${fixed || ro ? 'disabled' : ''} aria-label="${UNIT_LABEL[r.pricingModel]}, ${esc(m.name)}" oninput="engPlanSet(${i}, 'units', this.value)"><span class="input-group-text px-1 py-0 small" title="${UNIT_LABEL[r.pricingModel]}">${UNIT_SHORT[r.pricingModel]}</span></div>`}</td>
             <td><input type="number" min="0" step="0.01" class="form-control form-control-sm text-end" value="${r.unitPrice || ''}" placeholder="0" ${ro ? 'disabled' : ''} aria-label="Unit price, ${esc(m.name)}" oninput="engPlanSet(${i}, 'unitPrice', this.value)"></td>
             <td class="text-end" id="cp-actual-${i}"></td>
-            <td><input type="number" min="0" step="0.01" id="cp-signed-${i}" class="form-control form-control-sm text-end" value="${engSigned(r) || ''}" ${ro ? 'disabled' : ''} aria-label="Signed up, ${esc(m.name)}" oninput="engPlanSet(${i}, 'signedUp', this.value)" title="Copied from the actual price; change it to record the signed-up amount">
-              ${r.signedUp !== null && !ro ? `<button type="button" class="btn btn-link btn-sm p-0 float-end" style="font-size:10px" onclick="engPlanResetSigned(${i})">use actual</button>` : ''}</td>
+            <td><div class="input-group input-group-sm flex-nowrap"><input type="number" min="0" step="0.01" id="cp-signed-${i}" class="form-control form-control-sm text-end" value="${engSigned(r) || ''}" ${ro ? 'disabled' : ''} aria-label="Signed up, ${esc(m.name)}" oninput="engPlanSet(${i}, 'signedUp', this.value)" title="Copied from the actual price; change it to record the signed-up amount">
+              ${r.signedUp !== null && !ro ? `<button type="button" class="btn btn-light border px-1 py-0" title="Use the actual price again" aria-label="Use the actual price for ${esc(m.name)}" onclick="engPlanResetSigned(${i})"><i class="fa-solid fa-rotate-left"></i></button>` : ''}</div></td>
             <td class="text-end" id="cp-var-${i}"></td>
+            <td><textarea class="form-control form-control-sm" rows="1" maxlength="1000" ${ro ? 'disabled' : ''} aria-label="Notes, ${esc(m.name)}" oninput="engPlanSet(${i}, 'notes', this.value)">${esc(r.notes || '')}</textarea></td>
             <td>${ro ? '' : `<button class="btn btn-outline-danger btn-sm" onclick="engPlanRemove(${i})" aria-label="Remove ${esc(m.name)}"><i class="fa-solid fa-xmark"></i></button>`}</td></tr>`;
         }).join('');
-      }).join('') || '<tr><td colspan="8" class="text-muted text-center py-4">No items. Add a product / service above.</td></tr>'}</tbody>
-      <tfoot><tr class="fw-bold border-top"><td colspan="4" class="text-end">Total</td><td class="text-end" id="cp-total-actual"></td><td class="text-end" id="cp-total-signed"></td><td class="text-end" id="cp-total-var"></td><td></td></tr></tfoot>
+      }).join('') || '<tr><td colspan="9" class="text-muted text-center py-4">No items. Add a product / service above.</td></tr>'}</tbody>
+      <tfoot><tr class="fw-bold border-top"><td colspan="4" class="text-end">Total</td><td class="text-end" id="cp-total-actual"></td><td class="text-end" id="cp-total-signed"></td><td class="text-end" id="cp-total-var"></td><td colspan="2"></td></tr></tfoot>
     </table></div>`;
   engPlanFigures();
 }
 
 const engPlanBody = () => ({ id: E.plan.id, name: E.plan.name, notes: E.plan.notes,
-  items: engGroupRows(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, unitPrice: r.unitPrice, units: r.units, signedUp: r.signedUp })) });
+  items: engPlanGroups(E.plan.items).flatMap((g) => g.items).map((r) => ({ itemId: r.itemId, unitPrice: r.unitPrice, units: r.units, months: r.months, signedUp: r.signedUp, notes: r.notes })) });
 
 async function engSavePlan() {
   const out = await engPost({ action: 'plan', plan: engPlanBody() }, 'Saved');

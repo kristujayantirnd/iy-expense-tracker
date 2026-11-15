@@ -1,7 +1,7 @@
 // Receivables · Products & Services, Rate Cards and Client Engagement Plans.
 // Admin and Finance Admin change them; Management can look.
 // GET                         -> { products, rateCards, plans, clients, canEdit, admin }
-// POST {action, …}            -> product | deleteProduct | rateCard | deleteRateCard | apply | plan | freeze | unfreeze | deletePlan
+// POST {action, …}            -> product | deleteProduct | rateCard | deleteRateCard | apply | plan | freeze | unfreeze | deletePlan | reorderPlans
 //
 // Product items carry a pricing model, a mandatory flag and prerequisites (other item ids). A rate card copies
 // those attributes per item (they may be changed there) and adds a unit price. A client plan copies a rate card,
@@ -10,7 +10,7 @@
 import { sql, requireUser, isFinanceAdmin } from './_lib.js';
 
 class Bad extends Error {}
-export const PRICING = { per_head: 'Per Head', per_batch: 'Per Batch', per_hour: 'Per Hour', per_day: 'Per Day', per_month: 'Per Month', fixed: 'Fixed' };
+export const PRICING = { per_head: 'Per Head', per_head_month: 'Per Head-Monthly', per_batch: 'Per Batch', per_hour: 'Per Hour', per_day: 'Per Day', per_month: 'Per Month', fixed: 'Fixed' };
 
 const text = (v, max = 200, required = false, what = 'name') => {
   const s = String(v ?? '').trim();
@@ -33,13 +33,14 @@ const pricing = (v) => {
   return v;
 };
 const r2 = (n) => Math.round(n * 100) / 100;
-export const actualOf = (it) => r2(Number(it.unitPrice) * Number(it.units));
+// Per Head-Monthly rows also multiply by their months.
+export const actualOf = (it) => r2(Number(it.unitPrice) * Number(it.units) * (it.pricingModel === 'per_head_month' ? Number(it.months ?? 1) : 1));
 export const signedOf = (it) => (it.signedUp == null ? actualOf(it) : r2(Number(it.signedUp)));
 
 async function readAll(db) {
-  const [products, items, cards, cardItems, plans, planItems, clients] = await db.transaction([
+  const [products, items, cards, cardItems, plans, planItems, clients, employees] = await db.transaction([
     db`select id, name, description from ps_products order by lower(name)`,
-    db`select id, product_id as "productId", name, pricing_model as "pricingModel", mandatory, prerequisites from ps_items order by product_id, sort, id`,
+    db`select id, product_id as "productId", name, pricing_model as "pricingModel", mandatory, prerequisites, notes, employee_ids as "employeeIds" from ps_items order by product_id, sort, id`,
     db`select id, name, description, to_char(updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn" from rate_cards order by lower(name)`,
     db`select rate_card_id as "rateCardId", item_id as "itemId", unit_price::float8 as "unitPrice", pricing_model as "pricingModel", mandatory, prerequisites
        from rate_card_items order by rate_card_id, sort, id`,
@@ -47,18 +48,27 @@ async function readAll(db) {
               p.frozen_total::float8 as "frozenTotal", to_char(p.frozen_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "frozenOn",
               coalesce(nullif(f.name, ''), f.email) as "frozenBy", to_char(p.updated_at at time zone 'Asia/Kolkata', 'DD/MM/YYYY') as "updatedOn"
        from client_plans p join clients c on c.id = p.client_id left join users f on f.id = p.frozen_by
-       order by lower(c.name), p.created_at desc`,
+       order by p.sort, p.created_at desc`,
     db`select plan_id as "planId", item_id as "itemId", pricing_model as "pricingModel", mandatory, prerequisites,
-              unit_price::float8 as "unitPrice", units::float8 as units, signed_up::float8 as "signedUp"
+              unit_price::float8 as "unitPrice", units::float8 as units, months::float8 as months, signed_up::float8 as "signedUp", notes
        from client_plan_items order by plan_id, sort, id`,
     db`select id, name from clients order by lower(name)`,
+    db`select id, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where active order by 2`,
   ]);
   return {
     products: products.map((p) => ({ ...p, items: items.filter((i) => i.productId === p.id) })),
     rateCards: cards.map((c) => ({ ...c, items: cardItems.filter((i) => i.rateCardId === c.id) })),
     plans: plans.map((p) => ({ ...p, items: planItems.filter((i) => i.planId === p.id) })),
     clients,
+    employees,
   };
+}
+
+// Optional employees (logins) mapped to a list item.
+function employeesOf(v, staff) {
+  const ids = [...new Set((Array.isArray(v) ? v : []).map(Number))];
+  if (ids.some((x) => !staff.has(x))) throw new Bad('An employee picked for a list item no longer exists, please reload');
+  return ids;
 }
 
 // The item ids that exist, so prerequisites and rows can only point at real items.
@@ -74,13 +84,15 @@ async function saveProduct(db, body) {
   const rows = Array.isArray(p.items) ? p.items : [];
   if (rows.length > 200) throw new Bad('Up to 200 list items per product or service');
   const known = await itemIds(db);
+  const staff = new Set((await db`select id from users`).map((u) => u.id));
   const keys = new Set();
   const items = rows.map((it, n) => {
     const key = String(it?.key ?? '');
     if (!key || keys.has(key)) throw new Bad('Something went wrong with the list, please reload');
     keys.add(key);
     return { key, id: it.id ? intId(it.id) : null, name: text(it.name, 200, true, `name of list item ${n + 1}`), pricingModel: pricing(it.pricingModel),
-      mandatory: it.mandatory === true, prerequisites: [...new Set((Array.isArray(it.prerequisites) ? it.prerequisites : []).map(String))].filter((k) => k !== key) };
+      mandatory: it.mandatory === true, prerequisites: [...new Set((Array.isArray(it.prerequisites) ? it.prerequisites : []).map(String))].filter((k) => k !== key),
+      notes: text(it.notes, 1000, false, `notes of list item ${n + 1}`), employeeIds: employeesOf(it.employeeIds, staff) };
   });
   const lower = items.map((i) => i.name.toLowerCase());
   const dup = lower.find((n, i) => lower.indexOf(n) !== i);
@@ -129,7 +141,7 @@ async function saveProduct(db, body) {
   const toId = (k) => idOf.get(k) ?? Number(k);
   await db.transaction(items.map((it, n) => db`
     update ps_items set name = ${it.name}, pricing_model = ${it.pricingModel}, mandatory = ${it.mandatory},
-                        prerequisites = ${it.prerequisites.map(toId)}::int[], sort = ${n}
+                        prerequisites = ${it.prerequisites.map(toId)}::int[], notes = ${it.notes}, employee_ids = ${it.employeeIds}::int[], sort = ${n}
     where id = ${idOf.get(it.key)}`));
   return { notice: 'Product / service saved', id };
 }
@@ -197,9 +209,12 @@ async function applyRateCard(db, me, body) {
   const [card] = await db`select name from rate_cards where id = ${rateCardId}`;
   if (!card) throw new Bad('That rate card no longer exists');
   const name = text(body.name, 150, false, 'plan name') || card.name;
-  const [{ id }] = await db`insert into client_plans (client_id, name, rate_card_id, updated_by) values (${clientId}, ${name}, ${rateCardId}, ${me.id}) returning id`;
-  await db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, sort)
-           select ${id}, item_id, pricing_model, mandatory, prerequisites, unit_price, 1, sort from rate_card_items where rate_card_id = ${rateCardId}`;
+  // a new plan goes to the top of the list
+  const [{ id }] = await db`insert into client_plans (client_id, name, rate_card_id, updated_by, sort)
+                            select ${clientId}, ${name}, ${rateCardId}, ${me.id}, coalesce(min(sort), 0) - 1 from client_plans returning id`;
+  await db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, sort)
+           select ${id}, item_id, pricing_model, mandatory, prerequisites, unit_price, 1, case when pricing_model = 'per_head_month' then 1 end, sort
+           from rate_card_items where rate_card_id = ${rateCardId}`;
   return { notice: `${card.name} copied to ${client.name}. Now set the units for each item.`, id };
 }
 
@@ -250,8 +265,10 @@ async function savePlan(db, me, body) {
     if (seen.has(itemId)) throw new Bad('A list item is in the plan twice');
     seen.add(itemId);
     const units = a.pricing_model === 'fixed' ? 1 : num(it.units, 1e6, 'Units');
+    const months = a.pricing_model === 'per_head_month' ? (it.months === '' || it.months == null ? 1 : num(it.months, 1e4, 'Months')) : null;
     const signedUp = it.signedUp === '' || it.signedUp == null ? null : num(it.signedUp, 1e10, 'Signed up');
-    return { itemId, pricingModel: a.pricing_model, mandatory: a.mandatory, prerequisites: a.prerequisites, unitPrice: num(it.unitPrice, 1e10, 'Unit price'), units, signedUp };
+    return { itemId, pricingModel: a.pricing_model, mandatory: a.mandatory, prerequisites: a.prerequisites, unitPrice: num(it.unitPrice, 1e10, 'Unit price'), units, months,
+      signedUp, notes: text(it.notes, 1000, false, 'row notes') };
   });
   const problems = await planProblems(db, plan.rate_card_id, items);
   if (problems.length) throw new Bad(`Can't save yet: ${problems.join('; ')}.`);
@@ -265,8 +282,8 @@ async function savePlan(db, me, body) {
   await db.transaction([
     db`update client_plans set name = ${text(p.name, 150, true, 'plan name')}, notes = ${text(p.notes, 2000, false, 'notes')}, updated_by = ${me.id}, updated_at = now() where id = ${id}`,
     db`delete from client_plan_items where plan_id = ${id}`,
-    ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, signed_up, sort)
-                               values (${id}, ${it.itemId}, ${it.pricingModel}, ${it.mandatory}, ${it.prerequisites}::int[], ${it.unitPrice}, ${it.units}, ${it.signedUp}, ${n})`),
+    ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, signed_up, notes, sort)
+                               values (${id}, ${it.itemId}, ${it.pricingModel}, ${it.mandatory}, ${it.prerequisites}::int[], ${it.unitPrice}, ${it.units}, ${it.months}, ${it.signedUp}, ${it.notes}, ${n})`),
   ]);
   return { notice: plan.frozenTotal != null ? 'Saved. The signed-up total still matches the frozen total.' : 'Plan saved', id };
 }
@@ -275,7 +292,8 @@ const rupees = (n) => '₹' + Number(n).toLocaleString('en-IN', { minimumFractio
 
 async function freeze(db, me, body) {
   const id = intId(body.id, 'plan');
-  const items = (await db`select unit_price::float8 as "unitPrice", units::float8 as units, signed_up::float8 as "signedUp" from client_plan_items where plan_id = ${id}`);
+  const items = (await db`select pricing_model as "pricingModel", unit_price::float8 as "unitPrice", units::float8 as units, months::float8 as months, signed_up::float8 as "signedUp"
+                          from client_plan_items where plan_id = ${id}`);
   if (!items.length) throw new Bad('Save the plan with at least one item before freezing it');
   const total = r2(items.reduce((s, it) => s + signedOf(it), 0));
   if (!(total > 0)) throw new Bad('The signed-up total is ₹0. Set the units and charges before freezing.');
@@ -300,6 +318,12 @@ async function act(db, me, body) {
       if (me.role !== 'admin') throw new Bad('Only the admin can unfreeze a plan');
       await db`update client_plans set frozen_total = null, frozen_at = null, frozen_by = null where id = ${intId(body.id)}`;
       return { notice: 'Plan unfrozen. The signed-up total can change again.', id: Number(body.id) };
+    }
+    case 'reorderPlans': {
+      const ids = (Array.isArray(body.ids) ? body.ids : []).map((x) => intId(x, 'plan'));
+      if (!ids.length || new Set(ids).size !== ids.length) throw new Bad('Something went wrong with the order, please reload');
+      await db.transaction(ids.map((id, n) => db`update client_plans set sort = ${n} where id = ${id}`));
+      return { notice: 'Order saved' };
     }
     case 'deletePlan': {
       const id = intId(body.id, 'plan');
