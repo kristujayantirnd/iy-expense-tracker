@@ -312,3 +312,8 @@ create table if not exists invoice_allocations (
   amount numeric not null,
   primary key (invoice_id, item_id)
 );
+
+-- Invoice schedule rows carry the request's details: particulars, due date and an optional PO number.
+alter table plan_invoices add column if not exists particulars text not null default '';
+alter table plan_invoices add column if not exists due_date date;
+alter table plan_invoices add column if not exists po_number text not null default '';

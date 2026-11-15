@@ -388,7 +388,7 @@ const DB_ACTIONS = {
     }
     await db`update receivable_invoices set invoice_number = ${invoiceNumber}, pdf_url = ${pdfUrl}, with_gst = ${withGst}, to_receive = ${toReceive},
                status = ${status}, received_date = ${received}, invoice_date = ${invoiceDate},
-               due_date = case when ${moved} then ${invoiceDate}::date + ${DUE_DAYS}::int else due_date end,
+               due_date = case when ${moved} then coalesce(due_date + (${invoiceDate}::date - invoice_date), ${invoiceDate}::date + ${DUE_DAYS}::int) else due_date end,
                draft = null, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
     if (moved) {
       await db`update plan_invoices set invoice_date = ${invoiceDate} where invoice_id = ${r.id}`;

@@ -57,6 +57,7 @@ async function readAll(db) {
     db`select id, name from clients order by lower(name)`,
     db`select id, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where active order by 2`,
     db`select s.plan_id as "planId", s.seq, s.amount::float8 as amount, to_char(s.invoice_date, 'YYYY-MM-DD') as "invoiceDate", s.invoice_id as "invoiceId",
+              s.particulars, to_char(coalesce(r.due_date, s.due_date), 'YYYY-MM-DD') as "dueDate", s.po_number as "poNumber",
               r.status, r.invoice_number as "invoiceNumber", to_char(r.invoice_date, 'YYYY-MM-DD') as "currentDate"
        from plan_invoices s left join receivable_invoices r on r.id = s.invoice_id order by s.plan_id, s.seq`,
   ]);
@@ -304,7 +305,8 @@ async function savePlan(db, me, body) {
   const schedule = Array.isArray(p.schedule) ? await cleanSchedule(db, id, p.schedule) : null;
   await db.transaction([
     ...(schedule ? [db`delete from plan_invoices where plan_id = ${id} and invoice_id is null`,
-      ...schedule.rows.map((x, n) => db`insert into plan_invoices (plan_id, seq, amount, invoice_date) values (${id}, ${schedule.start + n}, ${x.amount}, ${x.invoiceDate})`)] : []),
+      ...schedule.rows.map((x, n) => db`insert into plan_invoices (plan_id, seq, amount, invoice_date, due_date, particulars, po_number)
+                                        values (${id}, ${schedule.start + n}, ${x.amount}, ${x.invoiceDate}, ${x.dueDate}, ${x.particulars}, ${x.poNumber})`)] : []),
     db`update client_plans set name = ${text(p.name, 150, true, 'plan name')}, notes = ${text(p.notes, 2000, false, 'notes')}, updated_by = ${me.id}, updated_at = now() where id = ${id}`,
     db`delete from client_plan_items where plan_id = ${id}`,
     ...items.map((it, n) => db`insert into client_plan_items (plan_id, item_id, pricing_model, mandatory, prerequisites, unit_price, units, months, signed_up, notes, sort)
@@ -313,7 +315,7 @@ async function savePlan(db, me, body) {
   return { notice: plan.frozenTotal != null ? 'Saved. The signed-up total still matches the frozen total.' : 'Plan saved', id };
 }
 
-// The invoice schedule's rows not generated yet: [{ amount, invoiceDate }] (generated rows stay as they are).
+// The invoice schedule's rows not generated yet: [{ amount, invoiceDate, dueDate, particulars, poNumber }] (generated rows stay as they are).
 async function cleanSchedule(db, planId, rows) {
   if (rows.length > 60) throw new Bad('Up to 60 invoices per plan');
   const [{ max }] = await db`select coalesce(max(seq), 0)::int as max from plan_invoices where plan_id = ${planId} and invoice_id is not null`;
@@ -322,7 +324,10 @@ async function cleanSchedule(db, planId, rows) {
     if (!(amount > 0)) throw new Bad(`Invoice ${n + 1}: the amount must be above 0`);
     const d = String(x.invoiceDate || '');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || Number.isNaN(Date.parse(d))) throw new Bad(`Invoice ${n + 1}: pick a date`);
-    return { amount, invoiceDate: d };
+    const due = String(x.dueDate || '');
+    if (due && (!/^\d{4}-\d{2}-\d{2}$/.test(due) || Number.isNaN(Date.parse(due)))) throw new Bad(`Invoice ${n + 1}: pick a valid due date`);
+    if (due && due < d) throw new Bad(`Invoice ${n + 1}: the due date is before the invoice date`);
+    return { amount, invoiceDate: d, dueDate: due || null, particulars: text(x.particulars, 1000, false, `particulars of invoice ${n + 1}`), poNumber: text(x.poNumber, 300, false, `PO number of invoice ${n + 1}`) };
   }) };
 }
 
@@ -334,7 +339,8 @@ async function generateInvoices(db, me, body) {
   const [plan] = await db`select p.name, p.frozen_total::float8 as "frozenTotal", c.name as client from client_plans p join clients c on c.id = p.client_id where p.id = ${id}`;
   if (!plan) throw new Bad('That plan no longer exists');
   if (plan.frozenTotal == null) throw new Bad('Freeze the plan first, so the signed-up total the invoices add up to is fixed');
-  const rows = await db`select id, seq, amount::float8 as amount, to_char(invoice_date, 'YYYY-MM-DD') as d, invoice_id from plan_invoices where plan_id = ${id} order by seq`;
+  const rows = await db`select id, seq, amount::float8 as amount, to_char(invoice_date, 'YYYY-MM-DD') as d, to_char(due_date, 'YYYY-MM-DD') as due,
+                               particulars, po_number, invoice_id from plan_invoices where plan_id = ${id} order by seq`;
   if (!rows.length) throw new Bad('Set the number of invoices and their dates, then save the plan');
   const total = r2(rows.reduce((s, x) => s + x.amount, 0));
   if (Math.round(total * 100) !== Math.round(plan.frozenTotal * 100)) {
@@ -351,9 +357,9 @@ async function generateInvoices(db, me, body) {
   for (const x of todo) {
     const k = rows.indexOf(x) + 1;
     const [q] = await db`insert into invoice_requests (invoice_type, client, invoice_date, description, po_number, amount)
-                         values ('Service', ${plan.client}, ${x.d}, ${`${plan.name} - Invoice ${k} of ${rows.length}`}, 'N/A', ${x.amount}) returning id`;
+                         values ('Service', ${plan.client}, ${x.d}, ${x.particulars || `${plan.name} - Invoice ${k}`}, ${x.po_number || 'N/A'}, ${x.amount}) returning id`;
     const [inv] = await db`insert into receivable_invoices (client, invoice_date, amount, due_date, invoice_type, status, request_id, updated_by)
-                           values (${plan.client}, ${x.d}, ${x.amount}, ${x.d}::date + ${DUE_DAYS}::int, ${typeSentence('Service')}, 'NEW_ENTRY', ${q.id}, ${me.id}) returning id`;
+                           values (${plan.client}, ${x.d}, ${x.amount}, coalesce(${x.due}::date, ${x.d}::date + ${DUE_DAYS}::int), ${typeSentence('Service')}, 'NEW_ENTRY', ${q.id}, ${me.id}) returning id`;
     // proportional shares; the rounding paise go to the largest item so the shares add up to the invoice
     const shares = items.map((it) => ({ itemId: it.itemId, amount: r2((x.amount * it.signed) / base) }));
     const gap = r2(x.amount - shares.reduce((s, a) => s + a.amount, 0));
