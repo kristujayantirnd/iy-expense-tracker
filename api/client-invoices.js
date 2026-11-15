@@ -437,7 +437,23 @@ const DB_ACTIONS = {
     for (const { id } of rq) if ((await pushRequest(db, id)).error) failed++;
     for (const { id } of ex) if (await pushExtract(db, id)) failed++;
     const done = ex.length + rq.length - failed;
-    return { notice: !ex.length && !rq.length ? 'Nothing waiting: the sheet is up to date.' : `${done} written to the sheet${failed ? `, ${failed} still failing (see the invoice)` : ''}.` };
+    // sheet rows whose record was removed here (e.g. merged into another invoice) are taken out of the mailing queue
+    let removed = 0;
+    try {
+      const st = await script(db, { action: 'mailStatus' });
+      const leftovers = async (list, table) => {
+        const ids = (list || []).map((x) => Number(x.id)).filter(Number.isInteger);
+        if (!ids.length) return [];
+        const have = new Set((table === 'r' ? await db`select id from invoice_requests where id = any(${ids}::int[])` : await db`select id from receivable_invoices where id = any(${ids}::int[])`).map((x) => x.id));
+        return ids.filter((x) => !have.has(x));
+      };
+      for (const id of await leftovers(st.extracts, 'e')) { await script(db, { action: 'deleteExtract', id }); removed++; }
+      for (const id of await leftovers(st.requests, 'r')) { await script(db, { action: 'deleteRequest', id }); removed++; }
+    } catch (e) {
+      failed++;
+    }
+    if (!ex.length && !rq.length && !removed) return { notice: 'Nothing waiting: the sheet is up to date.' };
+    return { notice: `${done} written to the sheet${removed ? `, ${removed} leftover row(s) removed` : ''}${failed ? `, ${failed} still failing (see the invoice)` : ''}.` };
   },
 
   // Catches up with emails the sheet's timers sent but couldn't report.
