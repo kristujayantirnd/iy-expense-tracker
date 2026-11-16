@@ -390,7 +390,7 @@ function iyCountReminders_(jobs) {
     try {
       const thread = iyThread_(job.thread, job.to, job.invoiceNumber);
       if (!thread) { Logger.log(job.label + ': Gmail thread not found'); return; }
-      const count = thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1).length;
+      const count = iyReminderCount_(thread);
       iyPost_({ action: 'counted', id: job.id, count: count, thread: thread.getId() });
     } catch (err) {
       Logger.log(job.label + ': not counted: ' + err.message);
@@ -417,7 +417,7 @@ function iySendJob_(job) {
     if (job.kind === 'reminder') {
       const thread = iyThread_(job.thread, job.to, job.invoiceNumber);
       if (!thread) return { result: 'failed', error: 'Gmail thread of the invoice email not found' };
-      const sentSoFar = thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1).length;
+      const sentSoFar = iyReminderCount_(thread);
       // the thread is the truth: send only if it holds fewer reminders than are due now
       const due = job.seq != null ? job.seq : job.due;
       if (sentSoFar >= due) return { result: 'skipped', count: sentSoFar, thread: thread.getId() };
@@ -507,7 +507,7 @@ function iyReminders() {
       const number = String(v[c.number] || '').trim();
       const thread = iyThread_(v[c.thread], client.primaryEmail, number);
       if (!thread) { Logger.log('Row ' + (i + 1) + ': Gmail thread not found'); continue; }
-      const sentSoFar = thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1).length;
+      const sentSoFar = iyReminderCount_(thread);
       const days = Math.round((today - date) / 864e5);
       if (sentSoFar >= intervals.length || days < intervals[sentSoFar]) continue;
       const html = iyFill_(setup.config.reminderTemplate, {
@@ -523,6 +523,14 @@ function iyReminders() {
       Logger.log('Row ' + (i + 1) + ': reminder failed: ' + err.message);
     }
   }
+}
+
+// Reminders already in a thread: our own messages carrying the tag. A client's reply quotes the reminder (tag included),
+// so messages from anyone else are not counted.
+function iyReminderCount_(thread) {
+  let me = '';
+  try { me = String(Session.getEffectiveUser().getEmail() || '').toLowerCase(); } catch (e) { /* no access: count by tag only */ }
+  return thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1 && (!me || String(m.getFrom() || '').toLowerCase().indexOf(me) !== -1)).length;
 }
 
 // Thread by saved id, by Gmail link, or by searching for the invoice number.
