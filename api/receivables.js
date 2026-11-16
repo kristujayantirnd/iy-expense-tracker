@@ -20,7 +20,7 @@ export function dashboardRow(r) {
   const isUpcoming = !isReceived && (!String(r.invoiceNumber || '').trim() || status.toUpperCase() === 'NEW_ENTRY');
   const type = String(r.invoiceType || '');
   return {
-    client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: dmy(r.invoiceDateIso), dueDate: dmy(r.dueDateIso), dueDateIso: r.dueDateIso || '',
+    client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: dmy(r.invoiceDateIso), dueDate: dmy(r.dueDateIso), dueDateIso: r.dueDateIso || '', invoiceDateIso: r.invoiceDateIso || '',
     amtReceivable: r.amount || 0, isUpcoming, isReceived, pdfLink: r.pdfUrl || '', rawStatus: status,
     invoiceCategory: isReimbType(type) ? 'reimbursement' : /service/i.test(type) ? 'service' : 'other',
   };

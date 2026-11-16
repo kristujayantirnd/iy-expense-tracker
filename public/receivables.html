@@ -219,6 +219,14 @@
     <!-- Filters: due dates, client, Service / Reimbursement toggles, refresh -->
     <div class="filter-card p-3 mb-4">
       <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-auto">
+          <span class="form-label text-muted fw-semibold small mb-1 d-block">Financial year (invoice date)</span>
+          <div class="category-toggle-group shadow-sm" role="radiogroup" aria-label="Financial year">
+            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="fy" class="visually-hidden" checked onchange="applyFilters()"> <span id="fyNowLabel">This FY</span></label>
+            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="lastfy" class="visually-hidden" onchange="applyFilters()"> <span id="fyLastLabel">Last FY</span></label>
+            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="all" class="visually-hidden" onchange="applyFilters()"> All time</label>
+          </div>
+        </div>
         <div class="col-6 col-md-2">
           <label for="fromDate" class="form-label text-muted fw-semibold small mb-1">From Due Date</label>
           <input type="date" id="fromDate" class="form-control">
@@ -615,7 +623,23 @@
       return { label: `${monthNames[d.getMonth()]} ${d.getFullYear()}`, key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` };
     }
 
+    // India financial year (April to March) containing a date, as ISO bounds.
+    function fyBounds(d = new Date()) { const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return { from: `${y}-04-01`, to: `${y + 1}-03-31`, label: `FY ${String(y).slice(2)}-${String(y + 1).slice(2)}` }; }
+    const FY_NOW = fyBounds();
+    const FY_LAST = fyBounds(new Date(Number(FY_NOW.from.slice(0, 4)) - 1, 5, 1));
+    document.getElementById('fyNowLabel').innerText = FY_NOW.label;
+    document.getElementById('fyLastLabel').innerText = FY_LAST.label;
+    // This FY also keeps older invoices that are still unpaid, so overdue money never drops out of view.
+    function inFy(inv, kind) {
+      if (kind === 'all') return true;
+      const d = inv.invoiceDateIso || inv.dueDateIso;
+      if (kind === 'lastfy') return Boolean(d) && d >= FY_LAST.from && d <= FY_LAST.to;
+      if (!d) return true;
+      return (d >= FY_NOW.from && d <= FY_NOW.to) || (d < FY_NOW.from && !inv.isReceived);
+    }
+
     function applyFilters() {
+      const fyKind = (document.querySelector('input[name="fyRange"]:checked') || {}).value || 'fy';
       const fromDate = document.getElementById('fromDate').value;
       const toDate = document.getElementById('toDate').value;
       const searchClient = document.getElementById('searchClient').value.toLowerCase().trim();
@@ -628,6 +652,7 @@
         if (showReimbursement && inv.invoiceCategory === 'reimbursement') matchesCategory = true;
         if (showService && showReimbursement && inv.invoiceCategory === 'other') matchesCategory = true;
         if (!matchesCategory) return false;
+        if (!inFy(inv, fyKind)) return false;
         if (fromDate && inv.dueDateIso && inv.dueDateIso < fromDate) return false;
         if (toDate && inv.dueDateIso && inv.dueDateIso > toDate) return false;
         if (searchClient && !String(inv.client || '').toLowerCase().includes(searchClient)) return false;
@@ -640,6 +665,7 @@
     }
 
     function clearFilters() {
+      document.querySelector('input[name="fyRange"][value="fy"]').checked = true;
       document.getElementById('fromDate').value = '';
       document.getElementById('toDate').value = '';
       document.getElementById('searchClient').value = '';
