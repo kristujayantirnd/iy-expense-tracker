@@ -325,12 +325,14 @@
                 <input type="search" id="manageSearch" class="form-control border-start-0 ps-0" placeholder="Search client, invoice no…" aria-label="Search invoices" oninput="renderManage()">
               </div>
               <span id="dbTools" class="d-none d-flex gap-2">
+                <button class="btn btn-light border btn-sm text-nowrap" onclick="toggleQueue()" title="Emails due now and the email log"><i class="fa-solid fa-list-check me-1"></i>Email queue</button>
                 <button class="btn btn-light border btn-sm text-nowrap" onclick="syncMail()" title="Bring in emails the sheet's timers sent (Finance Team requests, client emails)"><i class="fa-solid fa-envelope-circle-check me-1"></i>Check emails sent</button>
                 <button class="btn btn-light border btn-sm text-nowrap" id="resyncBtn" onclick="resyncSheet()" title="Write invoices whose sheet copy failed"><i class="fa-solid fa-arrows-rotate me-1"></i>Retry sheet sync</button>
               </span>
               <button class="btn btn-light border btn-sm" onclick="loadRows()" title="Refresh" aria-label="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
             </div>
           </div>
+          <div id="queueBox" class="mb-3 d-none"></div>
           <div id="draftsBox" class="mb-3 d-none"></div>
           <div class="small text-muted mb-2 d-flex gap-3 flex-wrap" aria-hidden="true">
             <span><span class="type-swatch" style="background:#16a34a"></span> Reimbursement invoice</span>

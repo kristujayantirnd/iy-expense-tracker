@@ -138,6 +138,42 @@ async function moveToDatabase() {
 }
 async function resyncSheet() { if (await invPost({ action: 'resync' }, 'Synced')) loadRows(); }
 async function syncMail() { if (await invPost({ action: 'syncMail' }, 'Checked')) { loadRows(); loadData(); } }
+// Email queue preview: what the database says is due now (the sheet's timers still do the sending) and the email log.
+async function toggleQueue(force) {
+  const box = $id('queueBox');
+  if (!force && !box.classList.contains('d-none')) { box.classList.add('d-none'); return; }
+  box.classList.remove('d-none');
+  box.innerHTML = '<div class="filter-card p-3 small text-muted">Loading the email queue…</div>';
+  try {
+    const res = await fetch('/api/client-invoices?queue=1', { cache: 'no-store' });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Could not read the email queue');
+    const when = (at) => (at ? mailWhen(at) : '');
+    const STATUS = { would_send: ['Would send', 'bg-info-subtle text-info-emphasis'], claimed: ['Claimed', 'bg-warning-subtle text-warning-emphasis'], sent: ['Sent', 'bg-success-subtle text-success-emphasis'],
+      failed: ['Failed', 'bg-danger-subtle text-danger-emphasis'], skipped: ['Skipped', 'bg-light text-dark'], expired: ['Expired', 'bg-light text-muted'] };
+    const SRC = { sheet: 'sheet timer', app: 'app', queue: 'queue' };
+    box.innerHTML = `<div class="filter-card p-3">
+      <div class="d-flex align-items-center gap-2 mb-2"><h2 class="h6 fw-bold mb-0 me-auto">Email queue <span class="text-muted fw-normal small">· as of ${esc(when(d.now))} (India time)</span></h2>
+        <button class="btn btn-light border btn-sm py-0" onclick="toggleQueue(true)"><i class="fa-solid fa-rotate-right"></i></button>
+        <button class="btn btn-light border btn-sm py-0" onclick="toggleQueue()" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
+      <p class="small text-muted mb-2">Worked out from the database. The sheet's timers still send the emails for now; this list is what the new queue would hand to the script.</p>
+      <div class="row g-3">
+        <div class="col-lg-5"><div class="fw-semibold small mb-1">Due now (${d.jobs.length})</div>
+          ${d.jobs.length ? `<ul class="list-unstyled small mb-0">${d.jobs.map((j) => `<li class="mb-1"><i class="fa-solid ${j.kind === 'request' ? 'fa-file-invoice' : 'fa-bell'} text-muted me-1"></i>${esc(j.label)}<div class="text-muted" style="font-size:.7rem">to ${esc([j.to, ...(j.cc || [])].join(', '))}</div></li>`).join('')}</ul>` : '<div class="small text-muted">Nothing due.</div>'}
+          ${d.problems.length ? `<div class="fw-semibold small mt-2 mb-1 text-danger">Due but cannot go (${d.problems.length})</div><ul class="list-unstyled small mb-0">${d.problems.map((p) => `<li class="mb-1"><i class="fa-solid fa-triangle-exclamation text-danger me-1"></i>${esc(p.label)}: ${esc(p.problem)}</li>`).join('')}</ul>` : ''}</div>
+        <div class="col-lg-7"><div class="fw-semibold small mb-1">Email log (latest ${d.log.length})</div>
+          ${d.log.length ? `<div class="table-responsive" style="max-height:16rem"><table class="table table-sm small mb-0"><thead class="bg-light"><tr><th>When</th><th>Email</th><th>Status</th></tr></thead><tbody>${d.log.map((l) => {
+            const [label, cls] = STATUS[l.status] || [l.status, 'bg-light'];
+            const what = l.kind === 'request' ? 'Finance Team request' : l.kind === 'client' ? 'Invoice to client' : `Reminder ${l.seq ?? ''}`;
+            return `<tr><td class="text-nowrap">${esc(when(l.at))}</td><td>${esc(what)} · ${esc(l.client || '')}${l.invoiceNumber ? ` · ${esc(l.invoiceNumber)}` : ''}${l.error ? `<div class="text-danger" style="font-size:.7rem">${esc(l.error)}</div>` : ''}</td>
+              <td class="text-nowrap"><span class="badge ${cls}" style="font-size:10px">${esc(label)}</span> <span class="text-muted" style="font-size:.7rem">${esc(SRC[l.source] || '')}</span></td></tr>`;
+          }).join('')}</tbody></table></div>` : '<div class="small text-muted">No emails logged yet. Emails sent from now on appear here.</div>'}</div>
+      </div></div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="filter-card p-3 small text-danger">${esc(e.message)}</div>`;
+  }
+}
+
 async function compareDashboard() {
   const done = busy('Reading both…');
   try {

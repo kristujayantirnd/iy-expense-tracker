@@ -330,3 +330,26 @@ alter table receivable_invoices add column if not exists last_email_at timestamp
 alter table receivable_invoices add column if not exists last_email_kind text not null default '';
 alter table receivable_invoices add column if not exists reminders_sent int;
 alter table invoice_requests add column if not exists sent_at timestamptz;
+
+-- Email queue (retiring the sheet, step 1): every email the database hands to the Apps Script, or learns was sent.
+-- status: would_send (report-only run) | claimed (15-minute lease) | sent | failed | skipped | expired.
+create table if not exists email_log (
+  id serial primary key,
+  job_key text not null,                -- request:<id> | reminder:<invoice id>:<n or ?> | client:<invoice id>
+  kind text not null,                   -- request | reminder | client
+  ref_id int not null,                  -- invoice_requests.id for request, receivable_invoices.id otherwise
+  seq int,                              -- reminder number
+  recipients text not null default '',
+  subject text not null default '',
+  status text not null,
+  thread text not null default '',
+  error text not null default '',
+  source text not null default 'queue', -- queue | sheet (reported by the sheet's timers) | app
+  day date not null default ((now() at time zone 'Asia/Kolkata')::date),
+  claimed_at timestamptz,
+  sent_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists email_log_live on email_log (job_key) where status in ('claimed', 'sent');
+create unique index if not exists email_log_dry on email_log (job_key, day) where status = 'would_send';
+create index if not exists email_log_ref on email_log (kind, ref_id);

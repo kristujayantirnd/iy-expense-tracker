@@ -14,6 +14,7 @@
 // Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
+import { claimJobs, dueJobs, finishJob, logSent, recentLog } from './_mailqueue.js';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 // Approving a reimbursement invoice merges its bills into the PDF through the sheet script (a few round trips).
@@ -348,6 +349,7 @@ export async function pushRequest(db, id, sendNow = false) {
     const out = await script(db, { action: 'putRequest', row, sendNow });
     await db`update invoice_requests set sheet_error = '', email_status = case when ${out.sent === true} then 'SENT' else email_status end,
                sent_at = case when ${out.sent === true} then now() else sent_at end where id = ${id}`;
+    if (out.sent === true) await logSent(db, 'request', id, null, { source: 'app' });
     return out;
   } catch (e) {
     const msg = String(e.message || e).slice(0, 300);
@@ -473,6 +475,7 @@ const DB_ACTIONS = {
     const out = await script(db, { action: 'send', row: extractRow(r) });
     await db`update receivable_invoices set status = 'REMINDER', email_thread = ${String(out.thread || '')}, sheet_error = '',
                last_email_at = now(), last_email_kind = 'Invoice emailed to client', reminders_sent = 0, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+    await logSent(db, 'client', r.id, null, { thread: String(out.thread || ''), source: 'app' });
     return { notice: 'Invoice emailed to the client. Reminders now follow the configured intervals.' };
   },
 
@@ -547,6 +550,7 @@ async function attachBillsDb(db, id, rebuild) {
 
 // The Apps Script timers report what they emailed.
 async function mailed(db, body) {
+  if (body.jobId !== undefined) return queueMailed(db, body);
   const id = idOf(body.id);
   if (body.kind === 'request') await db`update invoice_requests set email_status = 'SENT', sent_at = now() where id = ${id}`;
   else if (body.kind === 'reminder' || body.kind === 'client') {
@@ -556,6 +560,26 @@ async function mailed(db, body) {
                reminders_sent = coalesce(${count}::int, reminders_sent, 0),
                status = case when upper(status) in ('NEW_ENTRY', 'APPROVED') then 'REMINDER' else status end where id = ${id}`;
   } else throw new Bad('Unknown kind');
+  const n = Number(body.count);
+  await logSent(db, body.kind === 'request' ? 'request' : body.kind === 'reminder' ? 'reminder' : 'client', id,
+    body.kind === 'reminder' && Number.isInteger(n) ? n : null, { thread: text(body.thread, 200), source: 'sheet' });
+  return { ok: true };
+}
+
+// The script's answer for an email the queue handed it (step 2 of retiring the sheet).
+async function queueMailed(db, body) {
+  let out;
+  try { out = await finishJob(db, body); } catch (e) { throw new Bad(e.message); }
+  const { job, result, count } = out;
+  if (out.already || result === 'failed') return { ok: true };
+  if (job.kind === 'request' && result === 'sent') {
+    await db`update invoice_requests set email_status = 'SENT', sent_at = now() where id = ${job.refId}`;
+  } else if (job.kind === 'reminder' && result === 'sent') {
+    await db`update receivable_invoices set email_thread = case when ${text(body.thread, 200)} <> '' then ${text(body.thread, 200)} else email_thread end,
+               last_email_at = now(), last_email_kind = ${`Reminder ${job.seq ?? ''}`.trim()}, reminders_sent = coalesce(${job.seq}::int, reminders_sent) where id = ${job.refId}`;
+  } else if (job.kind === 'reminder' && result === 'skipped' && count != null) {
+    await db`update receivable_invoices set reminders_sent = ${count} where id = ${job.refId}`; // counted from the Gmail thread
+  }
   return { ok: true };
 }
 
@@ -746,6 +770,7 @@ export default async function handler(req, res) {
   if (req.method === 'POST' && req.body?.key !== undefined) {
     if (req.body.key !== invoiceToken()) return res.status(403).json({ error: 'Wrong key' });
     try {
+      if (req.body.action === 'claim') return res.status(200).json(await claimJobs(db, await readConfig(db), req.body.dry !== false));
       if (req.body.action !== 'mailed') return res.status(400).json({ error: 'Unknown action' });
       return res.status(200).json(await mailed(db, req.body));
     } catch (e) {
@@ -758,6 +783,12 @@ export default async function handler(req, res) {
   if (!me) return;
   if (!isFinanceAdmin(me)) return res.status(403).json({ error: 'Only Admin and Finance Admin can use the Client Invoice Automator' });
   try {
+    // Email queue preview: what is due now (nothing is claimed or logged) and the latest log entries.
+    if (req.method === 'GET' && req.query.queue) {
+      const { now, jobs, problems } = await dueJobs(db, await readConfig(db));
+      const strip = ({ html, ...j }) => j;
+      return res.status(200).json({ now, jobs: jobs.map(strip), problems, log: await recentLog(db) });
+    }
     if (req.method === 'GET' && req.query.rows) {
       if (await isDb(db)) {
         const cfg = await readConfig(db);
