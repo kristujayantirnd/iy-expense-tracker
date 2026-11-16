@@ -153,7 +153,7 @@ async function setQueueMode(sel) {
 function queueCompare(d) {
   const c = d.compare || { rows: [], extra: [] };
   if (!c.rows.length && !c.extra.length) return d.mode === 'report' ? '<div class="small text-muted mt-3">Report-only comparison: nothing logged yet. The first entries appear after the next hourly run.</div>' : '';
-  const what = (x) => (x.kind === 'request' ? 'Finance Team request' : `Reminder ${x.seq ?? '(no. from thread)'}`) + ` · #${x.refId}`;
+  const what = (x) => [x.kind === 'request' ? 'Finance Team request' : `Reminder ${x.seq ?? '(no. from thread)'}`, x.client, x.invoiceNumber || (x.kind === 'request' ? '' : 'no invoice no.')].filter(Boolean).join(' · ');
   const M = { sent: ['Sent the same day or next', 'text-success', 'fa-check'], earlier: ['Already sent earlier', 'text-success', 'fa-check-double'],
     missing: ['Not sent by the sheet', 'text-danger', 'fa-triangle-exclamation'], 'not listed': ['Sent, but the queue did not list it', 'text-warning', 'fa-circle-question'] };
   const all = [...c.rows, ...c.extra];
@@ -161,7 +161,7 @@ function queueCompare(d) {
   return `<details class="mt-3" ${bad ? 'open' : ''}><summary class="small fw-semibold">Report-only comparison, last 14 days: ${all.length - bad} agree, ${bad} to check</summary>
     <div class="table-responsive mt-2" style="max-height:14rem"><table class="table table-sm small mb-0"><thead class="bg-light"><tr><th>Queue day</th><th>Email</th><th>Result</th></tr></thead><tbody>
     ${all.map((x) => { const [n, cls, ic] = M[x.match]; return `<tr><td>${esc(x.day || '')}</td><td>${esc(what(x))}</td><td class="${cls}"><i class="fa-solid ${ic} me-1"></i>${n}${x.sentDay && x.match !== 'sent' ? ` (${esc(x.sentDay)})` : ''}</td></tr>`; }).join('')}
-    </tbody></table></div><div class="small text-muted mt-1">Reminders with no number yet are expected under "Not sent by the sheet" when the thread already holds them; the script checks the thread before sending.</div></details>`;
+    </tbody></table></div><div class="small text-muted mt-1">A reminder with no number yet is settled at the next hourly run: the script counts the reminders already in its Gmail thread (nothing is sent).</div></details>`;
 }
 
 // Email queue preview: what the database says is due now (the sheet's timers still do the sending) and the email log.

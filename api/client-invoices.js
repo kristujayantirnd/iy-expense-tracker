@@ -798,6 +798,14 @@ export default async function handler(req, res) {
         if (mode === 'sheet') return res.status(200).json({ mode, jobs: [] });
         return res.status(200).json({ mode, ...(await claimJobs(db, await readConfig(db), mode !== 'app')) });
       }
+      if (req.body.action === 'counted') { // report-only: the reminders already in an invoice's Gmail thread
+        const id = idOf(req.body.id), n = Number(req.body.count);
+        if (!Number.isInteger(n) || n < 0 || n > 50) throw new Bad('Invalid count');
+        await db`update receivable_invoices set reminders_sent = ${n},
+                   email_thread = case when email_thread = '' then ${text(req.body.thread, 200)} else email_thread end where id = ${id} and reminders_sent is null`;
+        await db`delete from email_log where kind = 'reminder' and ref_id = ${id} and seq is null and status = 'would_send'`; // placeholders, now settled
+        return res.status(200).json({ ok: true });
+      }
       if (req.body.action !== 'mailed') return res.status(400).json({ error: 'Unknown action' });
       return res.status(200).json(await mailed(db, req.body));
     } catch (e) {

@@ -379,7 +379,23 @@ function iyRequestEmails() {
     });
     return;
   }
+  if (res.mode === 'report') iyCountReminders_(res.jobs || []);
   iyRequestEmailsSheet_();
+}
+
+// Report-only: for reminders whose number the webapp doesn't know (invoices emailed before it kept count), counts the
+// reminders already in the Gmail thread and tells the webapp. Sends nothing.
+function iyCountReminders_(jobs) {
+  jobs.filter((j) => j.kind === 'reminder' && j.seq == null).forEach((job) => {
+    try {
+      const thread = iyThread_(job.thread, job.to, job.invoiceNumber);
+      if (!thread) { Logger.log(job.label + ': Gmail thread not found'); return; }
+      const count = thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1).length;
+      iyPost_({ action: 'counted', id: job.id, count: count, thread: thread.getId() });
+    } catch (err) {
+      Logger.log(job.label + ': not counted: ' + err.message);
+    }
+  });
 }
 
 // One email from the webapp's queue. Returns { result: sent | failed | skipped, thread, count, error }; never throws.

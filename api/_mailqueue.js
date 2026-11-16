@@ -175,10 +175,20 @@ export const recentLog = (db, limit = 60) => db`
 // (by the sheet's timers or the app) that day or the next, and emails sent that the queue never listed.
 export async function comparison(db, days = 14) {
   const [would, sent] = await db.transaction([
-    db`select distinct on (kind, ref_id, coalesce(seq, -1)) kind, ref_id as "refId", seq, to_char(day, 'YYYY-MM-DD') as day, job_key as key
-       from email_log where status = 'would_send' and day >= (now() at time zone 'Asia/Kolkata')::date - ${days}::int order by kind, ref_id, coalesce(seq, -1), day`,
-    db`select kind, ref_id as "refId", seq, to_char((sent_at at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD') as day, source
-       from email_log where status = 'sent' and kind <> 'client' and sent_at >= now() - make_interval(days => ${days + 1})`,
+    db`select distinct on (l.kind, l.ref_id, coalesce(l.seq, -1)) l.kind, l.ref_id as "refId", l.seq, to_char(l.day, 'YYYY-MM-DD') as day, l.job_key as key,
+              coalesce(r.client, q.client, '') as client, coalesce(r.invoice_number, rq.invoice_number, '') as "invoiceNumber"
+       from email_log l
+       left join receivable_invoices r on l.kind <> 'request' and r.id = l.ref_id
+       left join invoice_requests q on l.kind = 'request' and q.id = l.ref_id
+       left join receivable_invoices rq on l.kind = 'request' and rq.request_id = l.ref_id
+       where l.status = 'would_send' and l.day >= (now() at time zone 'Asia/Kolkata')::date - ${days}::int order by l.kind, l.ref_id, coalesce(l.seq, -1), l.day`,
+    db`select l.kind, l.ref_id as "refId", l.seq, to_char((l.sent_at at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD') as day, l.source,
+              coalesce(r.client, q.client, '') as client, coalesce(r.invoice_number, rq.invoice_number, '') as "invoiceNumber"
+       from email_log l
+       left join receivable_invoices r on l.kind <> 'request' and r.id = l.ref_id
+       left join invoice_requests q on l.kind = 'request' and q.id = l.ref_id
+       left join receivable_invoices rq on l.kind = 'request' and rq.request_id = l.ref_id
+       where l.status = 'sent' and l.kind <> 'client' and l.sent_at >= now() - make_interval(days => ${days + 1})`,
   ]);
   const next = (d) => addDays(d, 1);
   const hit = (w, x) => w.kind === x.kind && w.refId === x.refId && (w.seq == null || x.seq == null || w.seq === x.seq);
