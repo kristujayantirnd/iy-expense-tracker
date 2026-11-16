@@ -155,6 +155,22 @@ function rvTable(rows, label, expandable = false, items = []) {
 
 function rvToggle(key) { RV.open.has(key) ? RV.open.delete(key) : RV.open.add(key); rvRender(); }
 
+// Each widget shows its chart; the table under it stays folded until asked for (remembered in this browser).
+let rvShown = new Set();
+try { rvShown = new Set(JSON.parse(localStorage.getItem('rvTables') || '[]')); } catch { /* private window */ }
+function rvTableToggle(key) {
+  rvShown.has(key) ? rvShown.delete(key) : rvShown.add(key);
+  try { localStorage.setItem('rvTables', JSON.stringify([...rvShown])); } catch { /* private window */ }
+  rvRender();
+}
+function rvWidget(key, title, note, chart, table, cls) {
+  const open = rvShown.has(key);
+  return `<div class="${cls}"><div class="filter-card p-3 h-100">
+    <div class="d-flex align-items-start gap-2 mb-2"><div class="me-auto"><h2 class="h6 fw-bold mb-0">${title}</h2>${note ? `<div class="small text-muted">${note}</div>` : ''}</div>
+      ${table ? `<button type="button" class="btn btn-light border btn-sm py-0 text-nowrap" onclick="rvTableToggle('${key}')" aria-expanded="${open}"><i class="fa-solid fa-chevron-${open ? 'up' : 'down'} me-1"></i>${open ? 'Hide' : 'Show'} table</button>` : ''}</div>
+    ${chart}${open ? table : ''}</div></div>`;
+}
+
 function rvRender() {
   if (!RV.data) return;
   const c = rvCompute();
@@ -170,9 +186,8 @@ function rvRender() {
     <div class="d-flex gap-3 small mb-2 flex-wrap" aria-label="Legend">${RV_STATUS.map(([k, n]) => `<span><span class="rv-sw rv-${k}"></span>${n}</span>`).join('')}
       <span class="text-muted ms-auto">Service invoices only (reimbursements are left out). All amounts exclude GST. Hover a bar for the split.</span></div>
     <div class="row g-3">
-      <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-3">By product / service</h2>${rvBars(c.product, 'product')}${rvTable(c.product, 'Product / service', true, c.item)}</div></div>
-      <div class="col-lg-6"><div class="filter-card p-3 h-100"><h2 class="h6 fw-bold mb-1">By employee</h2>
-        <div class="small text-muted mb-2">From each plan row's employees and split (set in the plan, else in Products & Services; equal shares if no split).</div>${rvBars(c.employee, 'employee')}${rvTable(c.employee, 'Employee')}</div></div>
-      <div class="col-12"><div class="filter-card p-3"><h2 class="h6 fw-bold mb-3">By month (invoice date)</h2>${rvColumns(c.month)}${rvTable(c.month, 'Month')}</div></div>
+      ${rvWidget('month', 'By month (invoice date)', '', rvColumns(c.month), rvTable(c.month, 'Month'), 'col-12')}
+      ${rvWidget('product', 'By product / service', '', rvBars(c.product, 'product'), rvTable(c.product, 'Product / service', true, c.item), 'col-lg-6')}
+      ${rvWidget('employee', 'By employee', "From each plan row's employees and split (set in the plan, else in Products &amp; Services; equal shares if no split).", rvBars(c.employee, 'employee'), rvTable(c.employee, 'Employee'), 'col-lg-6')}
     </div>`;
 }
