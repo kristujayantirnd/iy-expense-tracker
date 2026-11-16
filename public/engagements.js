@@ -481,8 +481,9 @@ function engRenderPlans() {
 
 function engOpenApply() {
   if (!E.data.rateCards.length) return toast('Create a rate card first (Rate Cards tab)', false);
-  if (!E.data.clients.length) return toast('Add the client first (Clients tab)', false);
-  $id('apClient').innerHTML = E.data.clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const clients = E.data.clients.filter((c) => c.active !== false);
+  if (!clients.length) return toast('Add the client first (Clients tab), or make one active', false);
+  $id('apClient').innerHTML = clients.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $id('apCard').innerHTML = E.data.rateCards.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $id('apName').value = '';
   modal('applyModal').show();

@@ -78,7 +78,7 @@ async function readConfig(db) {
   const raw = await getSetting(db, 'invoiceConfig');
   return { ...DEFAULT_CONFIG, ...(raw ? JSON.parse(raw) : {}) };
 }
-const readClients = (db) => db`select id, name, emails, contact, on_hold as "onHold" from clients order by name`;
+const readClients = (db) => db`select id, name, emails, contact, on_hold as "onHold", active from clients order by name`;
 // Drafts of the Update invoice dialog, keyed by sheet row + client + invoice date so a re-sorted sheet can't
 // attach a draft to another invoice. Written with jsonb merge/delete so two people never overwrite each other's drafts.
 const ROW_DRAFTS = 'invoiceRowDrafts';
@@ -127,15 +127,16 @@ async function act(db, me, body) {
       return {};
     case 'client': {
       const c = body.client || {};
-      const emails = emailList(c.emails);
+      const active = c.active !== false;
+      const emails = emailList(c.emails, active); // an inactive client may have none (old clients from past years)
       const contact = text(c.contact, 100);
       const onHold = c.onHold === true;
       if (c.id) {
         if (!Number.isInteger(c.id)) throw new Bad('Client not found');
-        const rows = await db`update clients set emails = ${emails}, contact = ${contact}, on_hold = ${onHold} where id = ${c.id} returning id`;
+        const rows = await db`update clients set emails = ${emails}, contact = ${contact}, on_hold = ${onHold}, active = ${active} where id = ${c.id} returning id`;
         if (!rows.length) throw new Bad('Client not found');
       } else {
-        const rows = await db`insert into clients (name, emails, contact, on_hold) values (${text(c.name, 200, true)}, ${emails}, ${contact}, ${onHold})
+        const rows = await db`insert into clients (name, emails, contact, on_hold, active) values (${text(c.name, 200, true)}, ${emails}, ${contact}, ${onHold}, ${active})
                               on conflict do nothing returning id`;
         if (!rows.length) throw new Bad('A client with that name already exists');
       }
@@ -722,8 +723,9 @@ async function requestBasics(db, r) {
   const config = await readConfig(db);
   const invoiceType = text(r.invoiceType, 50, true);
   if (!config.invoiceTypes.includes(invoiceType)) throw new Bad('Unknown invoice type');
-  const [client] = await db`select name from clients where name = ${text(r.client, 200, true)}`;
+  const [client] = await db`select name, active from clients where name = ${text(r.client, 200, true)}`;
   if (!client) throw new Bad('Pick a client from the list');
+  if (!client.active) throw new Bad(`${client.name} is inactive. Make the client active (Clients tab) to raise an invoice.`);
   return { invoiceType, client: client.name };
 }
 

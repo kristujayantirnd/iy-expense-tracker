@@ -150,6 +150,8 @@ create table if not exists clients (
   created_at timestamptz not null default now()
 );
 create unique index if not exists clients_name_key on clients (lower(name));
+-- inactive: kept for history (old invoices, plans) but left out of the Create invoice and plan client pickers
+alter table clients add column if not exists active boolean not null default true;
 
 -- Client Invoice Automator: reimbursement invoice requests being put together row by row, one open per client.
 -- Sent to the sheet (and deleted here) when submitted to the Finance Team.

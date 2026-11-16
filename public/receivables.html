@@ -505,8 +505,9 @@
       <div class="modal-body d-grid gap-3">
         <div><label class="form-label small fw-semibold" for="clName">Client name (exactly as on the invoice)</label><input id="clName" class="form-control" maxlength="200" required>
           <div class="form-text" id="clNameHint">The sheet's invoice rows refer to this name, so it can't be changed later.</div></div>
-        <div><label class="form-label small fw-semibold" for="clEmails">Emails (first is "To", the rest are copied)</label><textarea id="clEmails" class="form-control" rows="3" required></textarea></div>
+        <div><label class="form-label small fw-semibold" for="clEmails">Emails (first is "To", the rest are copied)</label><textarea id="clEmails" class="form-control" rows="3"></textarea></div>
         <div><label class="form-label small fw-semibold" for="clContact">Contact person (used as {{ContactPoint}})</label><input id="clContact" class="form-control" maxlength="100"></div>
+        <label class="d-flex gap-2 small"><input id="clActive" type="checkbox" checked> Active (untick to hide this client from Create invoice and new plans; past invoices stay)</label>
         <label class="d-flex gap-2 small"><input id="clHold" type="checkbox"> On hold (no client emails or reminders)</label>
       </div>
       <div class="modal-footer"><button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary fw-semibold">Save client</button></div>

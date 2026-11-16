@@ -485,12 +485,12 @@ function requestTypeChanged() {
   if (reimb) { requestClientChanged(); renderRequestRows(); }
 }
 
-// Client picker: type to filter (any part of the name), arrows + Enter, or click. Clients on hold are left out.
+// Client picker: type to filter (any part of the name), arrows + Enter, or click. Clients on hold or inactive are left out.
 let clientShown = [], clientActive = -1;
 function openClientList(all) {
   if ($id('rqClient').disabled) return;
   const q = all ? '' : $id('rqClient').value.trim().toLowerCase();
-  clientShown = inv.clients.filter((c) => !c.onHold && (!q || c.name.toLowerCase().includes(q)));
+  clientShown = inv.clients.filter((c) => !c.onHold && c.active !== false && (!q || c.name.toLowerCase().includes(q)));
   clientActive = clientShown.length ? 0 : -1;
   renderClientList();
 }
@@ -614,7 +614,7 @@ function renderDrafts() {
 /* ---------- Clients ---------- */
 
 function renderClients() {
-  const list = inv.clients.filter((c) => matches('clientSearch', c.name, c.emails, c.contact, c.onHold ? 'on hold' : 'active'));
+  const list = inv.clients.filter((c) => matches('clientSearch', c.name, c.emails, c.contact, c.active === false ? 'inactive' : c.onHold ? 'on hold' : 'active'));
   $id('clientsTable').innerHTML = !inv.clients.length
     ? '<tr><td class="text-muted py-4 text-center">No clients yet. The admin can import them from the sheet (Automator Settings).</td></tr>'
     : !list.length ? '<tr><td class="text-muted py-4 text-center">No clients match your search.</td></tr>'
@@ -623,7 +623,7 @@ function renderClients() {
         <td class="fw-semibold" style="white-space:normal">${esc(c.name)}</td>
         <td style="white-space:normal;word-break:break-word">${esc(c.emails)}</td>
         <td>${esc(c.contact)}</td>
-        <td>${c.onHold ? '<span class="badge badge-soft badge-soft-overdue">On hold</span>' : '<span class="badge badge-soft badge-soft-received">Active</span>'}</td>
+        <td>${c.active === false ? '<span class="badge bg-light text-muted border">Inactive</span>' : c.onHold ? '<span class="badge badge-soft badge-soft-overdue">On hold</span>' : '<span class="badge badge-soft badge-soft-received">Active</span>'}</td>
         <td class="text-end"><button class="btn btn-light border btn-sm" onclick="openClient(${c.id})"><i class="fa-solid fa-pen"></i> Edit</button></td></tr>`).join('') + '</tbody>';
 }
 
@@ -636,12 +636,13 @@ function openClient(id) {
   $id('clEmails').value = editingClient ? editingClient.emails : '';
   $id('clContact').value = editingClient ? editingClient.contact : '';
   $id('clHold').checked = Boolean(editingClient && editingClient.onHold);
+  $id('clActive').checked = !editingClient || editingClient.active !== false;
   modal('clientModal').show();
 }
 
 async function saveClient(e) {
   e.preventDefault();
-  const ok = await invPost({ action: 'client', client: { id: editingClient?.id, name: $id('clName').value, emails: $id('clEmails').value, contact: $id('clContact').value, onHold: $id('clHold').checked } }, 'Client saved');
+  const ok = await invPost({ action: 'client', client: { id: editingClient?.id, name: $id('clName').value, emails: $id('clEmails').value, contact: $id('clContact').value, onHold: $id('clHold').checked, active: $id('clActive').checked } }, 'Client saved');
   if (ok) { modal('clientModal').hide(); renderClients(); }
 }
 

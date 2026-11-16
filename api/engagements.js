@@ -55,7 +55,7 @@ async function readAll(db) {
               unit_price::float8 as "unitPrice", units::float8 as units, months::float8 as months, signed_up::float8 as "signedUp", notes,
               employee_ids as "employeeIds", employee_split as "employeeSplit"
        from client_plan_items order by plan_id, sort, id`,
-    db`select id, name from clients order by lower(name)`,
+    db`select id, name, active from clients order by lower(name)`,
     db`select id, coalesce(nullif(name, ''), nullif(profile->>'name', ''), email) as name from users where active order by 2`,
     db`select s.plan_id as "planId", s.seq, s.amount::float8 as amount, to_char(s.invoice_date, 'YYYY-MM-DD') as "invoiceDate", s.invoice_id as "invoiceId",
               s.particulars, to_char(coalesce(r.due_date, s.due_date), 'YYYY-MM-DD') as "dueDate", s.po_number as "poNumber",
@@ -237,8 +237,9 @@ async function saveRateCard(db, body) {
 async function applyRateCard(db, me, body) {
   const clientId = intId(body.clientId, 'client');
   const rateCardId = intId(body.rateCardId, 'rate card');
-  const [client] = await db`select name from clients where id = ${clientId}`;
+  const [client] = await db`select name, active from clients where id = ${clientId}`;
   if (!client) throw new Bad('That client no longer exists');
+  if (!client.active) throw new Bad(`${client.name} is inactive. Make the client active (Receivables → Clients) first.`);
   const [card] = await db`select name from rate_cards where id = ${rateCardId}`;
   if (!card) throw new Bad('That rate card no longer exists');
   const name = text(body.name, 150, false, 'plan name') || card.name;
