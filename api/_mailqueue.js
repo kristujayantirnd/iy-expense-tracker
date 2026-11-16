@@ -24,6 +24,37 @@ const rupees = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFr
 const emails = (s) => String(s || '').split(/[;,\s]+/).filter(Boolean);
 const key = (s) => String(s || '').trim().toLowerCase();
 
+const REQUEST_COLS = (db, id) => db`select id, invoice_type as "invoiceType", client, to_char(invoice_date, 'YYYY-MM-DD') as "invoiceDate", description,
+  po_number as "poNumber", amount::float8 as amount, attachments, email_status as "emailStatus" from invoice_requests where id = ${id}`;
+// A Finance Team request email (or { problem } when it cannot go).
+function requestJob(q, cfg) {
+  const finance = emails(cfg.financeEmails);
+  const job = { key: `request:${q.id}`, kind: 'request', id: q.id, client: q.client, label: `Finance Team request · ${q.client} · ${q.invoiceType}` };
+  if (!finance.length) return { ...job, problem: 'Add the Finance Team emails in Automator Settings' };
+  if (!cfg.requestTemplate) return { ...job, problem: 'Add the Finance Team request template in Automator Settings' };
+  return {
+    ...job, to: finance[0], cc: finance.slice(1), subject: `Invoice Request: ${q.client} ${q.invoiceType}`,
+    html: fill(cfg.requestTemplate, {
+      InvoiceType: q.invoiceType, Client: q.client, PO_Number: q.poNumber || 'N/A', ItemDescription: q.description,
+      AmountwithoutGST: rupees(q.amount), InvoiceDate: dmy(q.invoiceDate),
+    }),
+    attachments: String(q.attachments || '').split(/\s+/).filter(Boolean),
+  };
+}
+
+// "Email the Finance Team now": claims that request straight away, whatever its date. null if already sent / being sent.
+export async function sendNowJob(db, cfg, id) {
+  const [q] = await REQUEST_COLS(db, id);
+  if (!q || String(q.emailStatus).toUpperCase() === 'SENT') return null;
+  const job = requestJob(q, cfg);
+  if (job.problem) throw new Error(job.problem);
+  await db`update email_log set status = 'expired' where status = 'claimed' and claimed_at < now() - make_interval(mins => ${LEASE_MIN})`;
+  const [row] = await db`insert into email_log (job_key, kind, ref_id, recipients, subject, status, claimed_at, source)
+                         values (${job.key}, 'request', ${id}, ${[job.to, ...job.cc].join(', ')}, ${job.subject}, 'claimed', now(), 'app')
+                         on conflict (job_key) where status in ('claimed', 'sent') do nothing returning id`;
+  return row ? { ...job, jobId: row.id } : null;
+}
+
 // Every email due now, with what the script needs to send it. problems: due but cannot go (missing email, template…).
 export async function dueJobs(db, cfg, now = new Date()) {
   const t = istNow(now);
@@ -38,20 +69,10 @@ export async function dueJobs(db, cfg, now = new Date()) {
        from receivable_invoices where upper(status) = 'REMINDER' and invoice_date is not null order by invoice_date, id`,
     db`select name, emails, contact, on_hold as "onHold" from clients`,
   ]);
-  const finance = emails(cfg.financeEmails);
   for (const q of requests) {
     if (`${addDays(q.invoiceDate, -(Number(cfg.requestDaysBefore) || 0))} ${cfg.requestTime || '10:00'}` > stamp) continue;
-    const job = { key: `request:${q.id}`, kind: 'request', id: q.id, client: q.client, label: `Finance Team request · ${q.client} · ${q.invoiceType}` };
-    if (!finance.length) { problems.push({ ...job, problem: 'Add the Finance Team emails in Automator Settings' }); continue; }
-    if (!cfg.requestTemplate) { problems.push({ ...job, problem: 'Add the Finance Team request template in Automator Settings' }); continue; }
-    jobs.push({
-      ...job, to: finance[0], cc: finance.slice(1), subject: `Invoice Request: ${q.client} ${q.invoiceType}`,
-      html: fill(cfg.requestTemplate, {
-        InvoiceType: q.invoiceType, Client: q.client, PO_Number: q.poNumber || 'N/A', ItemDescription: q.description,
-        AmountwithoutGST: rupees(q.amount), InvoiceDate: dmy(q.invoiceDate),
-      }),
-      attachments: String(q.attachments || '').split(/\s+/).filter(Boolean),
-    });
+    const job = requestJob(q, cfg);
+    (job.problem ? problems : jobs).push(job);
   }
   const book = new Map(clients.map((c) => [key(c.name), c]));
   const intervals = (cfg.reminderIntervals || []).map(Number).filter((n) => n > 0);
@@ -149,3 +170,23 @@ export const recentLog = (db, limit = 60) => db`
   left join receivable_invoices r on l.kind <> 'request' and r.id = l.ref_id
   left join invoice_requests q on l.kind = 'request' and q.id = l.ref_id
   order by l.id desc limit ${limit}`;
+
+// Report-only comparison, last `days` days: each email the queue would have sent against what was actually sent
+// (by the sheet's timers or the app) that day or the next, and emails sent that the queue never listed.
+export async function comparison(db, days = 14) {
+  const [would, sent] = await db.transaction([
+    db`select distinct on (kind, ref_id, coalesce(seq, -1)) kind, ref_id as "refId", seq, to_char(day, 'YYYY-MM-DD') as day, job_key as key
+       from email_log where status = 'would_send' and day >= (now() at time zone 'Asia/Kolkata')::date - ${days}::int order by kind, ref_id, coalesce(seq, -1), day`,
+    db`select kind, ref_id as "refId", seq, to_char((sent_at at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD') as day, source
+       from email_log where status = 'sent' and kind <> 'client' and sent_at >= now() - make_interval(days => ${days + 1})`,
+  ]);
+  const next = (d) => addDays(d, 1);
+  const hit = (w, x) => w.kind === x.kind && w.refId === x.refId && (w.seq == null || x.seq == null || w.seq === x.seq);
+  const rows = would.map((w) => {
+    const s = sent.find((x) => hit(w, x) && x.day >= w.day && x.day <= next(w.day));
+    const before = !s && sent.find((x) => hit(w, x) && x.day < w.day);
+    return { ...w, match: s ? 'sent' : before ? 'earlier' : 'missing', sentDay: (s || before || {}).day || '' };
+  });
+  const extra = sent.filter((x) => !would.some((w) => hit(w, x))).map((x) => ({ ...x, match: 'not listed' }));
+  return { rows, extra };
+}

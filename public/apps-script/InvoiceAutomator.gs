@@ -3,6 +3,9 @@
 // (emails to the Finance Team). Each row carries the webapp record's id in an AppId column.
 // The webapp calls doPost() to write rows and send; iyRequestEmails and iyReminders run on timers
 // (run iyInstallTriggers once) and tell the webapp what they emailed.
+// Email queue: the webapp's "Who sends the emails" setting decides what the timers do.
+//   sheet / report  the timers read the two tabs as before (report: the webapp also logs what its queue would send)
+//   app             the hourly timer asks the webapp for the emails due and sends them; the tabs are not read
 const APP_URL = '__APP_URL__';
 const APP_KEY = '__KEY__';
 const REMINDER_TAG = 'GAS_INV_REMINDER';
@@ -29,6 +32,7 @@ function doPost(e) {
       if (b.action === 'send') return out(iySendClient_(b));
       if (b.action === 'bills') return out(iyBillFiles_(b));
       if (b.action === 'saveMerged') return out(iySaveMerged_(b));
+      if (b.action === 'sendJobs') return out({ results: (b.jobs || []).map(iySendJob_) });
     } finally {
       lock.releaseLock();
     }
@@ -76,7 +80,19 @@ function iySetup_() {
     const emails = String(c.emails || '').split(/[;,\s]+/).filter(Boolean);
     clients[iyKey_(c.name)] = { name: c.name, primaryEmail: emails[0] || '', ccEmails: emails.slice(1), contactPoint: c.contact || '', onHold: c.onHold };
   });
-  return { config: out.config, clients: clients };
+  return { config: out.config, clients: clients, emailQueue: out.emailQueue || 'sheet' };
+}
+
+// POST to the webapp with the key; throws when it can't be reached.
+function iyPost_(payload) {
+  const res = UrlFetchApp.fetch(APP_URL + '/api/client-invoices', {
+    method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+    payload: JSON.stringify(Object.assign({ key: APP_KEY }, payload)),
+  });
+  let out = {};
+  try { out = JSON.parse(res.getContentText()); } catch (e) {}
+  if (res.getResponseCode() !== 200) throw new Error('Webapp: ' + (out.error || 'HTTP ' + res.getResponseCode()));
+  return out;
 }
 
 // Tells the webapp what a timer emailed (so its records stay right). A failure is only logged: the webapp's
@@ -351,8 +367,63 @@ function iyAttachment_(url) {
   }
 }
 
-// Hourly: emails the Finance Team for each RequestInvoice row not yet SENT once its scheduled time has come.
+// Hourly timer. Asks the webapp for work: in "app" mode it sends the emails the webapp says are due (Finance Team
+// requests and client reminders); otherwise it sends the RequestInvoice rows as before.
 function iyRequestEmails() {
+  const res = iyPost_({ action: 'claim' });
+  if (res.mode === 'app') {
+    (res.jobs || []).forEach((job) => {
+      const r = iySendJob_(job);
+      Logger.log(job.label + ': ' + r.result + (r.error ? ' (' + r.error + ')' : ''));
+      iyTell_(Object.assign({ jobId: job.jobId }, r));
+    });
+    return;
+  }
+  iyRequestEmailsSheet_();
+}
+
+// One email from the webapp's queue. Returns { result: sent | failed | skipped, thread, count, error }; never throws.
+function iySendJob_(job) {
+  try {
+    if (job.kind === 'request') {
+      const options = { htmlBody: job.html };
+      if (job.cc && job.cc.length) options.cc = job.cc.join(',');
+      if (job.attachments && job.attachments.length) options.attachments = job.attachments.map(iyAttachment_);
+      let msg;
+      try {
+        msg = GmailApp.createDraft(job.to, job.subject, 'Please view this email in an HTML-compatible client.', options).send();
+      } catch (err) {
+        throw new Error(err.message + (options.attachments ? ' (Gmail allows 25 MB of attachments per email.)' : ''));
+      }
+      iyMarkRequestSent_(job.id); // keeps the old tab in step, so going back to the sheet timers can't send it again
+      return { result: 'sent', thread: msg.getThread().getId() };
+    }
+    if (job.kind === 'reminder') {
+      const thread = iyThread_(job.thread, job.to, job.invoiceNumber);
+      if (!thread) return { result: 'failed', error: 'Gmail thread of the invoice email not found' };
+      const sentSoFar = thread.getMessages().filter((m) => m.getBody().indexOf(REMINDER_TAG) !== -1).length;
+      // the thread is the truth: send only if it holds fewer reminders than are due now
+      const due = job.seq != null ? job.seq : job.due;
+      if (sentSoFar >= due) return { result: 'skipped', count: sentSoFar, thread: thread.getId() };
+      thread.replyAll('', { htmlBody: job.html + REMINDER_MARKER });
+      return { result: 'sent', count: sentSoFar + 1, thread: thread.getId() };
+    }
+    return { result: 'failed', error: 'Unknown email kind' };
+  } catch (err) {
+    return { result: 'failed', error: String(err.message || err) };
+  }
+}
+
+function iyMarkRequestSent_(id) {
+  try {
+    const t = iyTab_(REQUESTS);
+    const r = iyFind_(t, id);
+    if (r && t.col('Email Status') !== -1) t.sh.getRange(r, t.col('Email Status') + 1).setValue('SENT');
+  } catch (e) { /* no tab any more: nothing to keep in step */ }
+}
+
+// Sheet mode: emails the Finance Team for each RequestInvoice row not yet SENT once its scheduled time has come.
+function iyRequestEmailsSheet_() {
   const config = iySetup_().config;
   const req = iyTab_(REQUESTS);
   const statusCol = req.col('Email Status');
@@ -402,6 +473,7 @@ function iySendRequestRow_(req, rowNo, config) {
 // Daily: for REMINDER rows, replies in the client's thread when the next interval (days since invoice date) is reached.
 function iyReminders() {
   const setup = iySetup_();
+  if (setup.emailQueue === 'app') return; // the hourly timer sends reminders from the webapp's queue
   const intervals = setup.config.reminderIntervals || [];
   if (!setup.config.reminderTemplate) throw new Error('Add the reminder email template in Automator Settings');
   const t = iyTab_(EXTRACTS);

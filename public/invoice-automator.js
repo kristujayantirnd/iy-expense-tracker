@@ -138,6 +138,32 @@ async function moveToDatabase() {
 }
 async function resyncSheet() { if (await invPost({ action: 'resync' }, 'Synced')) loadRows(); }
 async function syncMail() { if (await invPost({ action: 'syncMail' }, 'Checked')) { loadRows(); loadData(); } }
+const QUEUE_MODES = {
+  sheet: ['Sheet timers', 'The sheet\'s timers read the two tabs and send, as before. The list below is what the queue would send.'],
+  report: ['Sheet timers + queue report-only', 'The sheet\'s timers send; every hour the queue logs what it would have sent, compared below.'],
+  app: ['Queue (app)', 'The script\'s hourly timer sends what the app says is due. The sheet tabs are not read for emails.'],
+};
+async function setQueueMode(sel) {
+  const mode = sel.value;
+  if (mode === 'app' && !confirm('Switch sending to the queue?\n\nPaste and deploy the latest script first (Automator Settings). From the next hourly run, Finance Team requests and reminders go out from the app\'s data, not the sheet.')) { toggleQueue(true); return; }
+  await invPost({ action: 'queueMode', mode }, 'Saved');
+  toggleQueue(true);
+}
+// Report-only check: what the queue would have sent against what the sheet's timers actually sent.
+function queueCompare(d) {
+  const c = d.compare || { rows: [], extra: [] };
+  if (!c.rows.length && !c.extra.length) return d.mode === 'report' ? '<div class="small text-muted mt-3">Report-only comparison: nothing logged yet. The first entries appear after the next hourly run.</div>' : '';
+  const what = (x) => (x.kind === 'request' ? 'Finance Team request' : `Reminder ${x.seq ?? '(no. from thread)'}`) + ` · #${x.refId}`;
+  const M = { sent: ['Sent the same day or next', 'text-success', 'fa-check'], earlier: ['Already sent earlier', 'text-success', 'fa-check-double'],
+    missing: ['Not sent by the sheet', 'text-danger', 'fa-triangle-exclamation'], 'not listed': ['Sent, but the queue did not list it', 'text-warning', 'fa-circle-question'] };
+  const all = [...c.rows, ...c.extra];
+  const bad = all.filter((x) => x.match === 'missing' || x.match === 'not listed').length;
+  return `<details class="mt-3" ${bad ? 'open' : ''}><summary class="small fw-semibold">Report-only comparison, last 14 days: ${all.length - bad} agree, ${bad} to check</summary>
+    <div class="table-responsive mt-2" style="max-height:14rem"><table class="table table-sm small mb-0"><thead class="bg-light"><tr><th>Queue day</th><th>Email</th><th>Result</th></tr></thead><tbody>
+    ${all.map((x) => { const [n, cls, ic] = M[x.match]; return `<tr><td>${esc(x.day || '')}</td><td>${esc(what(x))}</td><td class="${cls}"><i class="fa-solid ${ic} me-1"></i>${n}${x.sentDay && x.match !== 'sent' ? ` (${esc(x.sentDay)})` : ''}</td></tr>`; }).join('')}
+    </tbody></table></div><div class="small text-muted mt-1">Reminders with no number yet are expected under "Not sent by the sheet" when the thread already holds them; the script checks the thread before sending.</div></details>`;
+}
+
 // Email queue preview: what the database says is due now (the sheet's timers still do the sending) and the email log.
 async function toggleQueue(force) {
   const box = $id('queueBox');
@@ -156,7 +182,11 @@ async function toggleQueue(force) {
       <div class="d-flex align-items-center gap-2 mb-2"><h2 class="h6 fw-bold mb-0 me-auto">Email queue <span class="text-muted fw-normal small">· as of ${esc(when(d.now))} (India time)</span></h2>
         <button class="btn btn-light border btn-sm py-0" onclick="toggleQueue(true)"><i class="fa-solid fa-rotate-right"></i></button>
         <button class="btn btn-light border btn-sm py-0" onclick="toggleQueue()" aria-label="Close"><i class="fa-solid fa-xmark"></i></button></div>
-      <p class="small text-muted mb-2">Worked out from the database. The sheet's timers still send the emails for now; this list is what the new queue would hand to the script.</p>
+      <div class="d-flex flex-wrap align-items-center gap-2 mb-2 small">
+        <span class="fw-semibold">Who sends the emails:</span>
+        ${d.admin ? `<select class="form-select form-select-sm w-auto" onchange="setQueueMode(this)" aria-label="Who sends the emails">${Object.entries(QUEUE_MODES).map(([k, [n]]) => `<option value="${k}" ${k === d.mode ? 'selected' : ''}>${n}</option>`).join('')}</select>`
+          : `<span class="badge bg-light text-dark border">${esc(QUEUE_MODES[d.mode][0])}</span>`}
+        <span class="text-muted">${esc(QUEUE_MODES[d.mode][1])}</span></div>
       <div class="row g-3">
         <div class="col-lg-5"><div class="fw-semibold small mb-1">Due now (${d.jobs.length})</div>
           ${d.jobs.length ? `<ul class="list-unstyled small mb-0">${d.jobs.map((j) => `<li class="mb-1"><i class="fa-solid ${j.kind === 'request' ? 'fa-file-invoice' : 'fa-bell'} text-muted me-1"></i>${esc(j.label)}<div class="text-muted" style="font-size:.7rem">to ${esc([j.to, ...(j.cc || [])].join(', '))}</div></li>`).join('')}</ul>` : '<div class="small text-muted">Nothing due.</div>'}
@@ -168,7 +198,7 @@ async function toggleQueue(force) {
             return `<tr><td class="text-nowrap">${esc(when(l.at))}</td><td>${esc(what)} · ${esc(l.client || '')}${l.invoiceNumber ? ` · ${esc(l.invoiceNumber)}` : ''}${l.error ? `<div class="text-danger" style="font-size:.7rem">${esc(l.error)}</div>` : ''}</td>
               <td class="text-nowrap"><span class="badge ${cls}" style="font-size:10px">${esc(label)}</span> <span class="text-muted" style="font-size:.7rem">${esc(SRC[l.source] || '')}</span></td></tr>`;
           }).join('')}</tbody></table></div>` : '<div class="small text-muted">No emails logged yet. Emails sent from now on appear here.</div>'}</div>
-      </div></div>`;
+      </div>${queueCompare(d)}</div>`;
   } catch (e) {
     box.innerHTML = `<div class="filter-card p-3 small text-danger">${esc(e.message)}</div>`;
   }

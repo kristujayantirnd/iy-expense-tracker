@@ -14,7 +14,11 @@
 // Update-invoice drafts (rowDraft) stay in the app (settings 'invoiceRowDrafts') until saved to the sheet.
 import { sql, requireUser, isFinanceAdmin, invoiceToken } from './_lib.js';
 import { SCRIPT_URL } from './_pdf.js';
-import { claimJobs, dueJobs, finishJob, logSent, recentLog } from './_mailqueue.js';
+import { claimJobs, comparison, dueJobs, finishJob, logSent, recentLog, sendNowJob } from './_mailqueue.js';
+// Who sends the emails: sheet (the sheet's timers read the tabs), report (same, and the queue logs what it would send),
+// app (the script sends what the database says is due).
+const QUEUE_MODES = ['sheet', 'report', 'app'];
+const queueMode = async (db) => { const m = await getSetting(db, 'emailQueue'); return QUEUE_MODES.includes(m) ? m : 'sheet'; };
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 
 // Approving a reimbursement invoice merges its bills into the PDF through the sheet script (a few round trips).
@@ -109,6 +113,13 @@ async function script(db, payload) {
 
 async function act(db, me, body) {
   if (body?.action === 'importSheet') return importSheet(db, me);
+  if (body?.action === 'queueMode') {
+    if (me.role !== 'admin') throw new Bad('Only the admin can change who sends the emails');
+    if (!QUEUE_MODES.includes(body.mode)) throw new Bad('Unknown mode');
+    await setSetting(db, 'emailQueue', body.mode);
+    return { notice: { sheet: 'The sheet\'s timers send the emails (as before).', report: 'Report-only: the sheet\'s timers send; the queue logs what it would send, for comparison.',
+      app: 'The queue sends the emails now: the script\'s hourly timer asks the app what is due. The sheet tabs are no longer read for emails.' }[body.mode] };
+  }
   if (DB_ACTIONS[body?.action] && (await isDb(db))) return DB_ACTIONS[body.action](db, me, body);
   switch (body?.action) {
     case 'config':
@@ -345,6 +356,18 @@ export async function pushExtract(db, id) {
 export async function pushRequest(db, id, sendNow = false) {
   const row = await requestRow(db, id);
   if (!row) return { error: '' };
+  if (sendNow && (await queueMode(db)) === 'app') {
+    const out = await pushRequest(db, id, false); // the sheet copy (while the sheet is still kept)
+    try {
+      const job = await sendNowJob(db, await readConfig(db), id);
+      if (!job) return { ...out, sent: false };
+      const [r] = (await script(db, { action: 'sendJobs', jobs: [job] })).results || [{ result: 'failed', error: 'No answer from the script' }];
+      await queueMailed(db, { jobId: job.jobId, ...r });
+      return r.result === 'sent' ? { sent: true } : { sent: false, sendError: r.error };
+    } catch (e) {
+      return { ...out, sent: false, sendError: String(e.message || e) };
+    }
+  }
   try {
     const out = await script(db, { action: 'putRequest', row, sendNow });
     await db`update invoice_requests set sheet_error = '', email_status = case when ${out.sent === true} then 'SENT' else email_status end,
@@ -389,7 +412,7 @@ const DB_ACTIONS = {
     if (r.draftId) await db`delete from reimb_requests where id = ${idOf(r.draftId)}`; // now a request
     const out = await pushRequest(db, q.id, r.sendNow === true);
     const sheetErr = (await pushExtract(db, x.id)) || out.error;
-    if (sheetErr) return { notice: `Invoice requested and saved, but the sheet copy failed: ${sheetErr} Use Retry sheet sync in Manage Invoices; the Finance Team email goes out once it is in the sheet.` };
+    if (sheetErr && !out.sent && (await queueMode(db)) !== 'app') return { notice: `Invoice requested and saved, but the sheet copy failed: ${sheetErr} Use Retry sheet sync in Manage Invoices; the Finance Team email goes out once it is in the sheet.` };
     if (out.sendError) return { notice: `Invoice requested, but the Finance Team email failed: ${out.sendError} It is retried every hour; don't request it again.` };
     return { notice: out.sent ? 'Invoice requested and emailed to the Finance Team' : 'Invoice requested. The Finance Team email goes out at the scheduled time.' };
   },
@@ -764,13 +787,17 @@ export default async function handler(req, res) {
   // The Apps Script reads the settings and the address book with the shared key (no login).
   if (req.method === 'GET' && req.query.key !== undefined) {
     if (req.query.key !== invoiceToken()) return res.status(403).json({ error: 'Wrong key: copy the script again from Receivables, Automator Settings' });
-    return res.status(200).json({ config: await readConfig(db), clients: await readClients(db) });
+    return res.status(200).json({ config: await readConfig(db), clients: await readClients(db), emailQueue: await queueMode(db) });
   }
   // The Apps Script timers report the emails they sent (db mode), with the same key.
   if (req.method === 'POST' && req.body?.key !== undefined) {
     if (req.body.key !== invoiceToken()) return res.status(403).json({ error: 'Wrong key' });
     try {
-      if (req.body.action === 'claim') return res.status(200).json(await claimJobs(db, await readConfig(db), req.body.dry !== false));
+      if (req.body.action === 'claim') {
+        const mode = await queueMode(db);
+        if (mode === 'sheet') return res.status(200).json({ mode, jobs: [] });
+        return res.status(200).json({ mode, ...(await claimJobs(db, await readConfig(db), mode !== 'app')) });
+      }
       if (req.body.action !== 'mailed') return res.status(400).json({ error: 'Unknown action' });
       return res.status(200).json(await mailed(db, req.body));
     } catch (e) {
@@ -787,7 +814,8 @@ export default async function handler(req, res) {
     if (req.method === 'GET' && req.query.queue) {
       const { now, jobs, problems } = await dueJobs(db, await readConfig(db));
       const strip = ({ html, ...j }) => j;
-      return res.status(200).json({ now, jobs: jobs.map(strip), problems, log: await recentLog(db) });
+      return res.status(200).json({ now, jobs: jobs.map(strip), problems, log: await recentLog(db), mode: await queueMode(db),
+        admin: me.role === 'admin', compare: await comparison(db) });
     }
     if (req.method === 'GET' && req.query.rows) {
       if (await isDb(db)) {
