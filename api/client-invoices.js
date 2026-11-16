@@ -259,7 +259,10 @@ export async function invoiceRecords(db, id = null) {
   return db`select id, client, invoice_number as "invoiceNumber", to_char(invoice_date, 'YYYY-MM-DD') as "invoiceDateIso", category,
                    amount::float8 as amount, with_gst::float8 as "withGst", to_receive::float8 as "toReceive", to_char(due_date, 'YYYY-MM-DD') as "dueDateIso",
                    pdf_url as "pdfUrl", status, email_thread as thread, invoice_type as "invoiceType", to_char(received_date, 'YYYY-MM-DD') as "receivedDateIso",
-                   bills, pdf_without_bills as "noBills", pdf_with_bills as "withBills", draft, request_id as "requestId", sheet_error as "sheetError"
+                   bills, pdf_without_bills as "noBills", pdf_with_bills as "withBills", draft, request_id as "requestId", sheet_error as "sheetError",
+                   last_email_at as "lastEmailAt", last_email_kind as "lastEmailKind", reminders_sent as "remindersSent",
+                   (select q.email_status from invoice_requests q where q.id = request_id) as "requestStatus",
+                   (select q.sent_at from invoice_requests q where q.id = request_id) as "requestSentAt"
             from receivable_invoices where (${id}::int is null or id = ${id}) order by invoice_date nulls last, id`;
 }
 
@@ -271,6 +274,48 @@ const screenRow = (r) => ({
   emailed: Boolean(r.thread), invoiceType: r.invoiceType, receivedDate: dmy(r.receivedDateIso), receivedDateIso: r.receivedDateIso || '',
   billCount: billLinks(r).length, billsAttached: Boolean(fileId(r.withBills)) && fileId(r.withBills) === fileId(r.pdfUrl), draft: r.draft || null, sheetError: r.sheetError,
 });
+
+// Email trail for the Manage Invoices row: the last email that went out and the next one the sheet's timers will send.
+// Times are India time (the sheet script's zone): Finance requests go hourly from "days before" + "time" on the invoice
+// date; reminders go daily at 10:00 once each interval (days since the invoice date) is reached.
+const IST = 330 * 60000;
+const istParts = (d) => { const x = new Date(d.getTime() + IST); return { date: x.toISOString().slice(0, 10), hm: x.toISOString().slice(11, 16) }; };
+const addDays = (iso, n) => new Date(Date.parse(iso + 'T00:00:00Z') + n * 864e5).toISOString().slice(0, 10);
+const istStamp = (d) => { const p = istParts(new Date(d)); return `${p.date} ${p.hm}`; };
+function mailTrail(r, cfg, now = new Date()) {
+  const today = istParts(now);
+  const status = String(r.status || '').toUpperCase();
+  const intervals = (cfg.reminderIntervals || []).map(Number);
+  let last = null;
+  const later = (x) => { if (x && (!last || x.at > last.at)) last = x; };
+  if (r.requestSentAt) later({ at: istStamp(r.requestSentAt), what: 'Finance Team request' });
+  else if (String(r.requestStatus || '').toUpperCase() === 'SENT') later({ at: '', what: 'Finance Team request' });
+  if (r.lastEmailAt) later({ at: istStamp(r.lastEmailAt), what: r.lastEmailKind || 'Client email' });
+  let next = null;
+  const upcoming = (date, hm) => { // a time already passed goes out at the timer's next run
+    const at = `${date} ${hm}`;
+    return at > `${today.date} ${today.hm}` ? at : null;
+  };
+  if (r.requestId && String(r.requestStatus || '').toUpperCase() !== 'SENT' && r.invoiceDateIso) {
+    const at = upcoming(addDays(r.invoiceDateIso, -(Number(cfg.requestDaysBefore) || 0)), cfg.requestTime || '10:00');
+    next = { at: at || istStamp(Math.ceil((now.getTime() + 1) / 36e5) * 36e5), what: 'Finance Team request' }; // next hourly run
+  } else if (status === 'REMINDER' && r.invoiceDateIso) {
+    let count = r.remindersSent;
+    if (count == null) { // from before the trail was kept: assume the daily timer sent every reminder already due
+      const due = intervals.filter((n) => `${addDays(r.invoiceDateIso, n)} 10:00` <= `${today.date} ${today.hm}`);
+      count = due.length;
+      if (count) later({ at: `${addDays(r.invoiceDateIso, intervals[count - 1])} 10:00`, what: `Reminder ${count}`, approx: true });
+      else last = { at: '', what: 'Invoice emailed to client' }; // it went after the Finance request; time not recorded
+    }
+    if (count < intervals.length) {
+      const at = upcoming(addDays(r.invoiceDateIso, intervals[count]), '10:00');
+      next = { at: at || `${today.hm < '10:00' ? today.date : addDays(today.date, 1)} 10:00`, what: `Reminder ${count + 1}` };
+    }
+  } else if (['NEW_ENTRY', 'APPROVED'].includes(status)) {
+    next = { at: '', what: 'Send to client (by hand)' };
+  }
+  return { lastEmail: last, nextEmail: next };
+}
 
 // What the sheet row holds (the Apps Script writes these by AppId).
 const extractRow = (r) => ({ id: r.id, client: r.client, invoiceNumber: r.invoiceNumber, invoiceDate: r.invoiceDateIso || '', category: r.category, amount: r.amount,
@@ -301,7 +346,8 @@ export async function pushRequest(db, id, sendNow = false) {
   if (!row) return { error: '' };
   try {
     const out = await script(db, { action: 'putRequest', row, sendNow });
-    await db`update invoice_requests set sheet_error = '', email_status = case when ${out.sent === true} then 'SENT' else email_status end where id = ${id}`;
+    await db`update invoice_requests set sheet_error = '', email_status = case when ${out.sent === true} then 'SENT' else email_status end,
+               sent_at = case when ${out.sent === true} then now() else sent_at end where id = ${id}`;
     return out;
   } catch (e) {
     const msg = String(e.message || e).slice(0, 300);
@@ -425,7 +471,8 @@ const DB_ACTIONS = {
     const row = screenRow(r);
     if (row.billCount && !row.billsAttached) throw new Bad('Approve this reimbursement invoice first so its bills are added to the PDF');
     const out = await script(db, { action: 'send', row: extractRow(r) });
-    await db`update receivable_invoices set status = 'REMINDER', email_thread = ${String(out.thread || '')}, sheet_error = '', updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
+    await db`update receivable_invoices set status = 'REMINDER', email_thread = ${String(out.thread || '')}, sheet_error = '',
+               last_email_at = now(), last_email_kind = 'Invoice emailed to client', reminders_sent = 0, updated_by = ${me.id}, updated_at = now() where id = ${r.id}`;
     return { notice: 'Invoice emailed to the client. Reminders now follow the configured intervals.' };
   },
 
@@ -501,9 +548,12 @@ async function attachBillsDb(db, id, rebuild) {
 // The Apps Script timers report what they emailed.
 async function mailed(db, body) {
   const id = idOf(body.id);
-  if (body.kind === 'request') await db`update invoice_requests set email_status = 'SENT' where id = ${id}`;
+  if (body.kind === 'request') await db`update invoice_requests set email_status = 'SENT', sent_at = now() where id = ${id}`;
   else if (body.kind === 'reminder' || body.kind === 'client') {
-    await db`update receivable_invoices set email_thread = ${text(body.thread, 200)},
+    const count = Number.isInteger(Number(body.count)) && body.kind === 'reminder' ? Number(body.count) : null;
+    await db`update receivable_invoices set email_thread = ${text(body.thread, 200)}, last_email_at = now(),
+               last_email_kind = ${body.kind === 'reminder' ? `Reminder ${count || ''}`.trim() : 'Invoice emailed to client'},
+               reminders_sent = coalesce(${count}::int, reminders_sent, 0),
                status = case when upper(status) in ('NEW_ENTRY', 'APPROVED') then 'REMINDER' else status end where id = ${id}`;
   } else throw new Bad('Unknown kind');
   return { ok: true };
@@ -709,7 +759,10 @@ export default async function handler(req, res) {
   if (!isFinanceAdmin(me)) return res.status(403).json({ error: 'Only Admin and Finance Admin can use the Client Invoice Automator' });
   try {
     if (req.method === 'GET' && req.query.rows) {
-      if (await isDb(db)) return res.status(200).json({ rows: (await invoiceRecords(db)).map(screenRow) });
+      if (await isDb(db)) {
+        const cfg = await readConfig(db);
+        return res.status(200).json({ rows: (await invoiceRecords(db)).map((r) => ({ ...screenRow(r), ...mailTrail(r, cfg) })) });
+      }
       return res.status(200).json(await script(db, { action: 'list' }));
     }
     let notice;

@@ -324,3 +324,9 @@ alter table ps_items add column if not exists employee_split jsonb not null defa
 -- A plan row may set its own employees and revenue split (null = follow the list item's in Products & Services).
 alter table client_plan_items add column if not exists employee_ids int[];
 alter table client_plan_items add column if not exists employee_split jsonb;
+
+-- Email trail for Manage Invoices: when the last client email / reminder went out, and when the Finance Team request was emailed.
+alter table receivable_invoices add column if not exists last_email_at timestamptz;
+alter table receivable_invoices add column if not exists last_email_kind text not null default '';
+alter table receivable_invoices add column if not exists reminders_sent int;
+alter table invoice_requests add column if not exists sent_at timestamptz;

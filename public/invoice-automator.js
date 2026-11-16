@@ -184,6 +184,17 @@ function showManageTab(key) { inv.manageTab = key; renderManage(); }
 // Amount Receivable column: the sheet's "to be received" figure, else worked out from the amount with GST (blank until that is in).
 const receivableOf = (r) => (r.toReceive > 0 ? r.toReceive : r.withGst > 0 ? toBeReceived(r.withGst, r.amount, isReimbRow(r)) : 0);
 
+// Tiny email trail under the client: last email sent and the next one scheduled (database mode).
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const mailWhen = (at) => (at ? `${Number(at.slice(8, 10))} ${MON[Number(at.slice(5, 7)) - 1]}${at.slice(0, 4) === String(new Date().getFullYear()) ? '' : ' ' + at.slice(0, 4)}, ${at.slice(11, 16)}` : '');
+function mailLine(r) {
+  const l = r.lastEmail, n = r.nextEmail;
+  if (!l && !n) return '';
+  const last = l ? `<span title="Last email: ${esc(l.what)}${l.at ? ' on ' + esc(mailWhen(l.at)) : ' (time not recorded)'}${l.approx ? ' (estimated from the reminder schedule)' : ''}"><i class="fa-solid fa-envelope-circle-check text-success me-1"></i>${l.at ? (l.approx ? '≈' : '') + esc(mailWhen(l.at)) : 'sent'} · ${esc(l.what)}</span>` : '';
+  const next = n ? `<span title="Next email: ${esc(n.what)}${n.at ? ' around ' + esc(mailWhen(n.at)) : ''}"><i class="fa-regular fa-clock me-1"></i>${n.at ? esc(mailWhen(n.at)) + ' · ' : ''}${esc(n.what)}</span>` : '';
+  return `<div class="mail-line">${last}${next}</div>`;
+}
+
 function renderManage() {
   const found = inv.rows.filter((r) => matches('manageSearch', isReimbRow(r) ? 'reimbursement' : 'service', rowDraftOf(r) ? 'draft' : '', r.client, r.invoiceNumber, r.invoiceDate, r.dueDate, r.amount, receivableOf(r) || ''));
   $id('manageTabs').innerHTML = MANAGE_TABS.map(([key, label]) => {
@@ -192,7 +203,10 @@ function renderManage() {
     return `<li class="nav-item" role="presentation"><button type="button" role="tab" aria-selected="${on}" class="nav-link py-1 px-3 ${on ? 'active' : ''}" onclick="showManageTab('${key}')">${label} <span class="badge rounded-pill ${on ? 'bg-white text-primary' : 'bg-light text-dark border'} ms-1">${n}</span></button></li>`;
   }).join('');
   const paidTab = inv.manageTab === 'PAID';
-  const list = found.filter((r) => tabOf(r) === inv.manageTab).slice().reverse(); // newest first
+  // the next email due goes first; rows waiting to be sent by hand next, then the rest newest first
+  const nextKey = (r) => (r.nextEmail ? (r.nextEmail.at ? '0' + r.nextEmail.at : '1') : '2');
+  const list = found.filter((r) => tabOf(r) === inv.manageTab).slice().reverse()
+    .map((r, i) => ({ r, i })).sort((a, b) => nextKey(a.r).localeCompare(nextKey(b.r)) || a.i - b.i).map((x) => x.r);
   if (!list.length) { $id('manageTable').innerHTML = `<tr><td class="text-muted py-4 text-center">${inv.rows.length ? 'No invoices here.' : 'No invoices to show.'}</td></tr>`; return; }
   $id('manageTable').innerHTML = `<thead class="bg-light"><tr><th>Client</th><th>Invoice Date</th><th class="text-end">Amount (w/o GST)</th><th class="text-end">Amount Receivable</th><th>${paidTab ? 'Received' : 'Due'}</th><th>PDF</th><th></th></tr></thead><tbody>`
     + list.map((r) => {
@@ -207,7 +221,7 @@ function renderManage() {
             ${r.invoiceNumber ? `<span class="inv-no">${esc(r.invoiceNumber)}</span>` : '<span class="inv-no text-muted fst-italic">No invoice no. yet</span>'}
             ${draft ? `<span class="badge badge-soft badge-soft-upcoming" style="font-size:10px" title="Draft by ${esc(draft.by)} on ${esc(draft.on)}, not saved yet"><i class="fa-solid fa-pen-ruler me-1"></i>Draft</span>` : ''}
             ${r.sheetError ? `<span class="badge bg-danger-subtle text-danger-emphasis border" style="font-size:10px" title="Not in the sheet yet: ${esc(r.sheetError)}"><i class="fa-solid fa-triangle-exclamation me-1"></i>Sheet copy failed</span>` : ''}
-          </div></td>
+          </div>${mailLine(r)}</td>
         <td>${esc(r.invoiceDate)}</td>
         <td class="text-end">${formatINR(r.amount)}</td>
         <td class="text-end" title="${isReimbRow(r) ? 'Amount with GST (reimbursement, no TDS)' : 'Amount with GST − 10% TDS on the amount w/o GST'}">${receivableOf(r) ? formatINR(receivableOf(r)) : '<span class="text-muted" title="Add the amount with GST to see this">-</span>'}</td>
