@@ -53,7 +53,7 @@ function rvCompute() {
   const inv = RV.data.invoices.filter((i) => (!from || (i.date && i.date >= from)) && (!to || (i.date && i.date <= to)) && (!client || i.client === client));
   const byInv = new Map(inv.map((i) => [i.id, i]));
   const allocs = RV.data.allocations.filter((a) => byInv.has(a.invoiceId));
-  const groups = { product: new Map(), item: new Map(), employee: new Map(), month: new Map() };
+  const groups = { product: new Map(), item: new Map(), employee: new Map(), month: new Map(), client: new Map() };
   const add = (g, key, label, st, amt, extra = {}) => {
     if (!g.has(key)) g.set(key, { key, label, received: 0, receivable: 0, upcoming: 0, total: 0, ...extra });
     const row = g.get(key); row[st] += amt; row.total += amt;
@@ -65,6 +65,7 @@ function rvCompute() {
     totals[st] += i.amount; totals.total += i.amount;
     const m = (i.date || '').slice(0, 7);
     if (m) add(groups.month, m, `${MONTHS[Number(m.slice(5)) - 1]} ${m.slice(2, 4)}`, st, i.amount);
+    add(groups.client, i.client.toLowerCase(), i.client, st, i.amount);
     const own = allocs.filter((a) => a.invoiceId === i.id);
     const rest = rvR2(i.amount - own.reduce((s, a) => s + a.amount, 0));
     if (rest > 0.004) { add(groups.product, '_none', NOPLAN, st, rest, { muted: true }); add(groups.employee, '_none', NOPLAN, st, rest, { muted: true }); totals.unplanned += rest; }
@@ -88,7 +89,7 @@ function rvCompute() {
   }
   const sorted = (g) => [...g.values()].map((r) => ({ ...r, received: rvR2(r.received), receivable: rvR2(r.receivable), upcoming: rvR2(r.upcoming), total: rvR2(r.total) }))
     .sort((a, b) => (a.muted - b.muted) || b.total - a.total);
-  return { totals, invoices: inv.length, product: sorted(groups.product), item: sorted(groups.item), employee: sorted(groups.employee),
+  return { totals, invoices: inv.length, product: sorted(groups.product), item: sorted(groups.item), employee: sorted(groups.employee), client: sorted(groups.client),
     month: [...groups.month.values()].sort((a, b) => a.key.localeCompare(b.key)) };
 }
 
@@ -171,6 +172,10 @@ function rvWidget(key, title, note, chart, table, cls) {
     ${chart}${open ? table : ''}</div></div>`;
 }
 
+// "Not from a plan" stays in the tables but is left out of the product and employee charts.
+const rvPlanned = (rows) => rows.filter((r) => r.key !== '_none');
+const rvUnplannedNote = (c) => (c.totals.unplanned ? `${formatINR(c.totals.unplanned)} not from a plan is in the table only.` : '');
+
 function rvRender() {
   if (!RV.data) return;
   const c = rvCompute();
@@ -187,7 +192,8 @@ function rvRender() {
       <span class="text-muted ms-auto">Service invoices only (reimbursements are left out). All amounts exclude GST. Hover a bar for the split.</span></div>
     <div class="row g-3">
       ${rvWidget('month', 'By month (invoice date)', '', rvColumns(c.month), rvTable(c.month, 'Month'), 'col-12')}
-      ${rvWidget('product', 'By product / service', '', rvBars(c.product, 'product'), rvTable(c.product, 'Product / service', true, c.item), 'col-lg-6')}
-      ${rvWidget('employee', 'By employee', "From each plan row's employees and split (set in the plan, else in Products &amp; Services; equal shares if no split).", rvBars(c.employee, 'employee'), rvTable(c.employee, 'Employee'), 'col-lg-6')}
+      ${rvWidget('product', 'By product / service', rvUnplannedNote(c), rvBars(rvPlanned(c.product), 'product'), rvTable(c.product, 'Product / service', true, c.item), 'col-lg-6')}
+      ${rvWidget('employee', 'By employee', "From each plan row's employees and split (set in the plan, else in Products &amp; Services; equal shares if no split). " + rvUnplannedNote(c), rvBars(rvPlanned(c.employee), 'employee'), rvTable(c.employee, 'Employee'), 'col-lg-6')}
+      ${rvWidget('client', 'By client', '', rvBars(c.client, 'client'), rvTable(c.client, 'Client'), 'col-12')}
     </div>`;
 }
