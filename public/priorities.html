@@ -421,13 +421,37 @@
       };
       const stageNo = (st) => `<span class="text-[11px] text-slate-400 bg-slate-800 border border-slate-700 rounded px-1.5 shrink-0">Stage ${st.stagePosition} / ${st.stageTotal}</span>`;
       const owner = (st) => `<span class="inline-flex items-center gap-1 text-[11px] ${st.effectiveOwnerName ? 'text-slate-300' : 'text-slate-500'}"><i class="fa-solid fa-user-tie text-blue-400"></i>${st.effectiveOwnerName ? esc(st.effectiveOwnerName) : 'Unassigned'}</span>`;
+      /* Completed ClickUp subtasks of a stage that is still open: its card leaves
+         out the "▸ Completed tasks:" block, and a "completed subtasks" card in
+         the Completed section lists them (the same as the Project Tracker). */
+      const cardRemarks = (st) => {
+        if (st.isCompleted || !st.remarks) return st.remarks || '';
+        const out = []; let skip = false;
+        for (const l of String(st.remarks).split('\n')) {
+          if (/^\s*▸ Completed tasks:\s*$/.test(l)) { skip = true; continue; }
+          if (skip && /^\s*(•|☑)\s/.test(l)) continue;
+          skip = false;
+          if (/^\s*☑\s.*\(Subtask from ClickUp\)\s*$/.test(l)) continue;
+          out.push(l);
+        }
+        return out.join('\n').trim();
+      };
+      const companionCard = (st) => {
+        const items = st.subtasksCompleted || [];
+        return `<div class="bg-slate-900 p-3 rounded-lg border border-emerald-500/25">
+          <div class="flex justify-between items-start gap-2"><h4 class="font-bold text-sm text-slate-100 break-words"><i class="fa-solid fa-list-check text-emerald-400 mr-1.5"></i>${esc(st.stageName)}
+            <span class="text-[11px] font-normal text-slate-400 whitespace-nowrap">· completed subtasks ${items.length}/${st.subtasksTotal || items.length}</span></h4>${stageNo(st)}</div>
+          <ul class="mt-1.5 space-y-0.5">${items.map((x) => `<li class="text-xs text-slate-300 break-words">☑ ${esc(x.name)}${x.doneAt ? ` <span class="text-[11px] text-slate-500">${esc(dmy(ymd(new Date(x.doneAt))))}</span>` : ''}</li>`).join('')}</ul>
+          <p class="text-[11px] text-slate-500 mt-1.5">The stage is still open; its remaining subtasks are on its card.</p>
+          <div class="mt-1.5">${owner(st)}</div></div>`;
+      };
       const pendingCard = (st) => {
         const u = urgency(st);
         const dateCls = u === 'overdue' ? 'text-red-400' : u === 'today' ? 'text-amber-400' : 'text-slate-400';
         return `<div class="bg-slate-900 p-3 rounded-lg border ${u === 'overdue' ? 'border-red-500/40' : 'border-slate-700'}">
           <div class="flex justify-between items-start gap-2"><h4 class="font-bold text-sm text-slate-100 break-words">${esc(st.stageName)} ${pill(st)}</h4>${stageNo(st)}</div>
           <p class="text-xs ${dateCls} mt-1"><i class="fa-regular fa-calendar mr-1 opacity-60"></i>Completes ${esc(dmy(st.calculatedDueDate))}${st.durationDays != null ? ` (${st.durationDays} day${st.durationDays === 1 ? '' : 's'})` : ''}${u === 'overdue' ? ' · overdue' : u === 'today' ? ' · today' : ''}</p>
-          ${st.remarks ? `<p class="text-xs text-slate-400 mt-1.5 break-words whitespace-pre-line">${linkify(st.remarks)}</p>` : ''}
+          ${cardRemarks(st) ? `<p class="text-xs text-slate-400 mt-1.5 break-words whitespace-pre-line">${linkify(cardRemarks(st))}</p>` : ''}
           <div class="mt-1.5">${owner(st)}</div></div>`;
       };
       const doneCard = (st) => {
@@ -450,14 +474,15 @@
       const pending = all.filter((st) => !st.isCompleted);
       const completed = all.filter((st) => st.isCompleted)
         .sort((a, b) => (b.completedAt || b.calculatedDueDate).localeCompare(a.completedAt || a.calculatedDueDate));
+      const comps = pending.filter((st) => (st.subtasksCompleted || []).length);
       return `<section>
           <h3 class="font-bold text-amber-400 mb-3"><i class="fa-solid fa-hourglass-half mr-2"></i>Pending <span class="text-slate-400 font-normal text-sm">(${pending.length})</span></h3>
           ${pending.length ? `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">${pending.map(pendingCard).join('')}</div>`
             : `<p class="text-sm text-slate-500">${all.length ? 'Nothing pending: all stages are done.' : 'No stages yet.'}</p>`}
         </section>
-        <details class="mt-6 bg-slate-900/60 border border-emerald-500/30 rounded-xl p-4">
-          <summary class="font-bold text-emerald-400 cursor-pointer select-none"><i class="fa-solid fa-circle-check mr-2"></i>Completed <span class="text-slate-400 font-normal text-sm">(${completed.length})</span></summary>
-          ${completed.length ? `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start mt-4">${completed.map(doneCard).join('')}</div>`
+        <details class="mt-6 bg-slate-900/60 border border-emerald-500/30 rounded-xl p-4" ${comps.length ? 'open' : ''}>
+          <summary class="font-bold text-emerald-400 cursor-pointer select-none"><i class="fa-solid fa-circle-check mr-2"></i>Completed <span class="text-slate-400 font-normal text-sm">(${completed.length}${comps.length ? ` · ${comps.length} with completed subtasks` : ''})</span></summary>
+          ${completed.length || comps.length ? `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start mt-4">${comps.map(companionCard).join('')}${completed.map(doneCard).join('')}</div>`
             : '<p class="text-sm text-slate-500 mt-3">No stages completed yet.</p>'}
         </details>`;
     }
