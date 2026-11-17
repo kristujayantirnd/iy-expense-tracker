@@ -254,7 +254,9 @@
           <div><label class="form-label small fw-semibold mb-1" for="rvTo">to</label><input type="date" id="rvTo" class="form-control form-control-sm" onchange="rvClearPreset(); rvRender()"></div>
           <div class="btn-group btn-group-sm" role="group" aria-label="Period">
             <button type="button" class="btn btn-light border" data-rv-preset="fy" onclick="rvPreset('fy')">This FY</button>
-            <button type="button" class="btn btn-light border" data-rv-preset="lastfy" onclick="rvPreset('lastfy')">Last FY</button>
+            <button type="button" class="btn btn-light border" id="rvPrev" onclick="rvStep(-1)" aria-label="Previous financial year" title="Previous financial year"><i class="fa-solid fa-chevron-left"></i></button>
+            <span class="btn btn-light border" id="rvFyLabel" data-rv-preset="year" style="min-width:6.5rem;cursor:default" aria-live="polite">FY –</span>
+            <button type="button" class="btn btn-light border" id="rvNext" onclick="rvStep(1)" aria-label="Next financial year" title="Next financial year"><i class="fa-solid fa-chevron-right"></i></button>
             <button type="button" class="btn btn-light border" data-rv-preset="all" onclick="rvPreset('all')">All time</button>
           </div>
           <div><label class="form-label small fw-semibold mb-1" for="rvClient">Client</label><select id="rvClient" class="form-select form-select-sm" style="min-width:14rem" onchange="rvRender()"></select></div>
@@ -390,7 +392,6 @@
       let done = false;
       return () => { if (done) return; done = true; busy.n -= 1; if (!busy.n) { el.classList.add('d-none'); document.body.style.cursor = ''; } };
     }
-    const rvClearPreset = () => document.querySelectorAll('[data-rv-preset]').forEach((b) => b.classList.remove('active'));
     async function logout() {
       await fetch('/api/logout', { method: 'POST' }).catch(() => {});
       location.href = '/payouts.html';

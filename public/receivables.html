@@ -69,6 +69,9 @@
     .category-toggle-item { padding: 6px 14px; border-radius: 8px; font-size: .825rem; font-weight: 600; cursor: pointer; user-select: none; transition: all .2s ease; }
     .category-toggle-item:has(input:checked) { background: #fff; color: var(--text-main); box-shadow: 0 2px 6px rgba(0,0,0,.06); }
     .category-toggle-item:has(input:focus-visible) { outline: 2px solid var(--primary-accent); }
+    button.category-toggle-item { background: transparent; border: 0; color: inherit; }
+    button.category-toggle-item:disabled { opacity: .35; cursor: default; }
+    .category-toggle-item.on { background: #fff; color: var(--text-main); box-shadow: 0 2px 6px rgba(0,0,0,.06); }
 
     .nav-pills-modern .nav-link { color: var(--text-muted); font-weight: 600; font-size: .9rem; border-radius: 12px; padding: .6rem 1.2rem; transition: all .2s ease; }
     .nav-pills-modern .nav-link:hover { background: rgba(255,255,255,.6); color: var(--text-main); }
@@ -221,10 +224,12 @@
       <div class="row g-2 align-items-end">
         <div class="col-12 col-md-auto">
           <span class="form-label text-muted fw-semibold small mb-1 d-block">Financial year (invoice date)</span>
-          <div class="category-toggle-group shadow-sm" role="radiogroup" aria-label="Financial year">
-            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="fy" class="visually-hidden" checked onchange="applyFilters()"> <span id="fyNowLabel">This FY</span></label>
-            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="lastfy" class="visually-hidden" onchange="applyFilters()"> <span id="fyLastLabel">Last FY</span></label>
-            <label class="category-toggle-item mb-0"><input type="radio" name="fyRange" value="all" class="visually-hidden" onchange="applyFilters()"> All time</label>
+          <div class="category-toggle-group shadow-sm" role="group" aria-label="Financial year">
+            <button type="button" class="category-toggle-item" id="fyNow" onclick="setFy('now')">This FY</button>
+            <button type="button" class="category-toggle-item px-2" id="fyPrev" onclick="stepFy(-1)" aria-label="Previous financial year" title="Previous financial year"><i class="fa-solid fa-chevron-left"></i></button>
+            <span class="category-toggle-item text-center" id="fyLabel" style="min-width:5.5rem;cursor:default" aria-live="polite">FY –</span>
+            <button type="button" class="category-toggle-item px-2" id="fyNext" onclick="stepFy(1)" aria-label="Next financial year" title="Next financial year"><i class="fa-solid fa-chevron-right"></i></button>
+            <button type="button" class="category-toggle-item" id="fyAll" onclick="setFy('all')">All time</button>
           </div>
         </div>
         <div class="col-6 col-md-2">
@@ -625,21 +630,35 @@
 
     // India financial year (April to March) containing a date, as ISO bounds.
     function fyBounds(d = new Date()) { const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return { from: `${y}-04-01`, to: `${y + 1}-03-31`, label: `FY ${String(y).slice(2)}-${String(y + 1).slice(2)}` }; }
-    const FY_NOW = fyBounds();
-    const FY_LAST = fyBounds(new Date(Number(FY_NOW.from.slice(0, 4)) - 1, 5, 1));
-    document.getElementById('fyNowLabel').innerText = FY_NOW.label;
-    document.getElementById('fyLastLabel').innerText = FY_LAST.label;
-    // This FY also keeps older invoices that are still unpaid, so overdue money never drops out of view.
-    function inFy(inv, kind) {
-      if (kind === 'all') return true;
+    const FY_NOW_YEAR = Number(fyBounds().from.slice(0, 4));
+    let fyYear = FY_NOW_YEAR; // start year of the financial year shown; null = all time
+    const fyOf = (iso) => { const y = Number(iso.slice(0, 4)); return Number(iso.slice(5, 7)) >= 4 ? y : y - 1; };
+    function fyRange() {
+      const ys = rawInvoices.map((i) => i.invoiceDateIso || i.dueDateIso).filter(Boolean).map(fyOf);
+      return { min: Math.min(FY_NOW_YEAR, ...ys), max: Math.max(FY_NOW_YEAR, ...ys) };
+    }
+    function syncFy() {
+      const { min, max } = fyRange();
+      document.getElementById('fyLabel').innerText = fyYear == null ? 'FY –' : fyBounds(new Date(fyYear, 5, 1)).label;
+      document.getElementById('fyPrev').disabled = fyYear != null && fyYear - 1 < min;
+      document.getElementById('fyNext').disabled = fyYear != null && fyYear + 1 > max;
+      document.getElementById('fyNow').classList.toggle('on', fyYear === FY_NOW_YEAR);
+      document.getElementById('fyLabel').classList.toggle('on', fyYear != null && fyYear !== FY_NOW_YEAR);
+      document.getElementById('fyAll').classList.toggle('on', fyYear == null);
+    }
+    function setFy(kind) { fyYear = kind === 'all' ? null : FY_NOW_YEAR; applyFilters(); }
+    function stepFy(d) { const { min, max } = fyRange(); fyYear = Math.min(max, Math.max(min, (fyYear ?? FY_NOW_YEAR) + d)); applyFilters(); }
+    // The current FY also keeps older invoices that are still unpaid, so overdue money never drops out of view.
+    function inFy(inv) {
+      if (fyYear == null) return true;
       const d = inv.invoiceDateIso || inv.dueDateIso;
-      if (kind === 'lastfy') return Boolean(d) && d >= FY_LAST.from && d <= FY_LAST.to;
-      if (!d) return true;
-      return (d >= FY_NOW.from && d <= FY_NOW.to) || (d < FY_NOW.from && !inv.isReceived);
+      const from = `${fyYear}-04-01`, to = `${fyYear + 1}-03-31`;
+      if (!d) return fyYear === FY_NOW_YEAR;
+      return (d >= from && d <= to) || (fyYear === FY_NOW_YEAR && d < from && !inv.isReceived);
     }
 
     function applyFilters() {
-      const fyKind = (document.querySelector('input[name="fyRange"]:checked') || {}).value || 'fy';
+      syncFy();
       const fromDate = document.getElementById('fromDate').value;
       const toDate = document.getElementById('toDate').value;
       const searchClient = document.getElementById('searchClient').value.toLowerCase().trim();
@@ -652,7 +671,7 @@
         if (showReimbursement && inv.invoiceCategory === 'reimbursement') matchesCategory = true;
         if (showService && showReimbursement && inv.invoiceCategory === 'other') matchesCategory = true;
         if (!matchesCategory) return false;
-        if (!inFy(inv, fyKind)) return false;
+        if (!inFy(inv)) return false;
         if (fromDate && inv.dueDateIso && inv.dueDateIso < fromDate) return false;
         if (toDate && inv.dueDateIso && inv.dueDateIso > toDate) return false;
         if (searchClient && !String(inv.client || '').toLowerCase().includes(searchClient)) return false;
@@ -665,7 +684,7 @@
     }
 
     function clearFilters() {
-      document.querySelector('input[name="fyRange"][value="fy"]').checked = true;
+      fyYear = FY_NOW_YEAR;
       document.getElementById('fromDate').value = '';
       document.getElementById('toDate').value = '';
       document.getElementById('searchClient').value = '';

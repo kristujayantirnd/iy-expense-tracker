@@ -29,7 +29,7 @@ async function rvLoad() {
     const clients = [...new Set(data.invoices.map((i) => i.client))].sort((a, b) => a.localeCompare(b));
     $id('rvClient').innerHTML = '<option value="">All clients</option>' + clients.map((c) => `<option>${esc(c)}</option>`).join('');
     if (!$id('rvFrom').value && !$id('rvTo').value) rvPreset('fy');
-    else rvRender();
+    else { rvSyncPeriod(); rvRender(); }
   } catch (e) {
     $id('rvBody').innerHTML = `<div class="alert alert-danger">${esc(e.message)}</div>`;
   } finally {
@@ -37,13 +37,36 @@ async function rvLoad() {
   }
 }
 
-function rvPreset(kind) {
-  const [f, t] = kind === 'fy' ? rvFy() : kind === 'lastfy' ? rvFy(new Date(new Date().getFullYear() - 1, new Date().getMonth(), 1)) : ['', ''];
-  $id('rvFrom').value = f;
-  $id('rvTo').value = t;
+// Period: one financial year (stepped with ‹ ›, from the oldest year with invoices to the newest), all time, or custom dates.
+let rvYear = null; // start year of the financial year shown; null for all time / custom dates
+const rvFyStart = (iso) => { const y = Number(iso.slice(0, 4)); return Number(iso.slice(5, 7)) >= 4 ? y : y - 1; };
+const rvFyName = (y) => `FY ${String(y).slice(2)}-${String(y + 1).slice(2)}`;
+function rvYearRange() {
+  const now = Number(rvFy()[0].slice(0, 4));
+  const ys = (RV.data?.invoices || []).filter((i) => i.date).map((i) => rvFyStart(i.date));
+  return { now, min: Math.min(now, ...ys), max: Math.max(now, ...ys) };
+}
+function rvSyncPeriod() {
+  const { now, min, max } = rvYearRange();
+  $id('rvFyLabel').innerText = rvYear == null ? 'FY –' : rvFyName(rvYear);
+  $id('rvPrev').disabled = rvYear != null && rvYear - 1 < min;
+  $id('rvNext').disabled = rvYear != null && rvYear + 1 > max;
+  const kind = rvYear == null ? ($id('rvFrom').value || $id('rvTo').value ? '' : 'all') : rvYear === now ? 'fy' : 'year';
   document.querySelectorAll('[data-rv-preset]').forEach((b) => b.classList.toggle('active', b.dataset.rvPreset === kind));
+}
+function rvSetYear(y) {
+  rvYear = y;
+  $id('rvFrom').value = y == null ? '' : `${y}-04-01`;
+  $id('rvTo').value = y == null ? '' : `${y + 1}-03-31`;
+  rvSyncPeriod();
   rvRender();
 }
+function rvPreset(kind) { rvSetYear(kind === 'fy' ? rvYearRange().now : null); }
+function rvStep(d) {
+  const { now, min, max } = rvYearRange();
+  rvSetYear(Math.min(max, Math.max(min, (rvYear ?? now) + d)));
+}
+function rvClearPreset() { rvYear = null; rvSyncPeriod(); }
 
 // Amounts per (key, status) for the invoices in the filter.
 function rvCompute() {
