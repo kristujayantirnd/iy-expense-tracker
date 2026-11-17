@@ -480,7 +480,7 @@
           ${pending.length ? `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">${pending.map(pendingCard).join('')}</div>`
             : `<p class="text-sm text-slate-500">${all.length ? 'Nothing pending: all stages are done.' : 'No stages yet.'}</p>`}
         </section>
-        <details class="mt-6 bg-slate-900/60 border border-emerald-500/30 rounded-xl p-4" ${comps.length ? 'open' : ''}>
+        <details class="mt-6 bg-slate-900/60 border border-emerald-500/30 rounded-xl p-4">
           <summary class="font-bold text-emerald-400 cursor-pointer select-none"><i class="fa-solid fa-circle-check mr-2"></i>Completed <span class="text-slate-400 font-normal text-sm">(${completed.length}${comps.length ? ` · ${comps.length} with completed subtasks` : ''})</span></summary>
           ${completed.length || comps.length ? `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start mt-4">${comps.map(companionCard).join('')}${completed.map(doneCard).join('')}</div>`
             : '<p class="text-sm text-slate-500 mt-3">No stages completed yet.</p>'}
